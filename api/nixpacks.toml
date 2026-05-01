@@ -1,0 +1,8 @@
+# Coolify builds this repo with the *api* directory as the app root.
+# https://nixpacks.com/docs/configuration/file
+
+[phases.install]
+cmds = ["npm ci"]
+
+[start]
+cmd = "npm run start:deploy"

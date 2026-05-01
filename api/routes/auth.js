@@ -8,7 +8,7 @@ const {
 } = require("../lib/otp");
 const { sendOtpEmail } = require("../lib/email");
 
-module.exports = function createAuthRouter(pool) {
+module.exports = function createAuthRouter(pool, requireAuth) {
   const router = express.Router();
 
   function normalizeEmail(email) {
@@ -185,6 +185,10 @@ module.exports = function createAuthRouter(pool) {
       console.error(e);
       return res.status(500).json({ error: "Verification failed" });
     }
+  });
+
+  router.get("/me", requireAuth, (req, res) => {
+    res.json({ user: req.user });
   });
 
   return router;

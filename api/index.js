@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const express = require("express");
+const cors = require("cors");
 const { createPool } = require("./db/pool");
 const createAuthRouter = require("./routes/auth");
 const createRequireAuth = require("./middleware/requireAuth");
@@ -22,6 +23,7 @@ async function main() {
   }
 
   const app = express();
+  app.use(cors());
   app.use(express.json());
 
   app.get("/", (_req, res) => {
@@ -29,8 +31,8 @@ async function main() {
   });
 
   if (dbOk) {
-    app.use("/auth", createAuthRouter(pool));
     const requireAuth = createRequireAuth(pool);
+    app.use("/auth", createAuthRouter(pool, requireAuth));
     app.use("/projects", createProjectsRouter(pool, requireAuth));
   }
 

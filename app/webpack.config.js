@@ -1,6 +1,11 @@
 const path = require('path');
+const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
+
+const DEFAULT_SERENIDAD_API =
+  process.env.SERENIDAD_API_URL ||
+  'http://iokwcc8o0s4cw4s48ockoc8g.5.78.111.174.sslip.io';
 
 module.exports = {
   entry: {
@@ -30,6 +35,9 @@ module.exports = {
     extensions: ['.js', '.jsx'],
   },
   plugins: [
+    new webpack.DefinePlugin({
+      'process.env.SERENIDAD_API_URL': JSON.stringify(DEFAULT_SERENIDAD_API),
+    }),
     new HtmlWebpackPlugin({
       filename: 'index.html',  // Output file name
       template: './public/index.html',  // Template file
