@@ -7,6 +7,7 @@ import animeFacts from '../../data/animeFacts.json';
 import { apiUrl } from '../../config';
 import EditorLayout from './EditorLayout';
 import ComposeLayout from './ComposeLayout';
+import ShareModal from './ShareModal';
 
 const REMOTE_CAPTION_DEFAULT = {
   fontSize: 16,
@@ -29,7 +30,8 @@ function remoteDetailToProjectData(projectRow, frames) {
         id: f.id,
         thumbnail: f.result || '',
         positivePrompt: f.prompt || '',
-        negativePrompt: f.negative_prompt || '',
+        references: Array.isArray(f.reference_urls) ? f.reference_urls : [],
+        model: f.model || '',
         voiceline: meta.voiceline || '',
         speaker: meta.speaker || 'Narrator',
         baseModel: meta.baseModel || '',
@@ -98,8 +100,16 @@ const ProjectComponent = ({ projectId }) => {
 
   // Prompt
   const [prompt, setPrompt] = useState('');
-  const [negativePrompt, setNegativePrompt] = useState('');
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Fal models + per-scene picks
+  const [falModels, setFalModels] = useState([]);
+  const [defaultFalModelId, setDefaultFalModelId] = useState('fal-ai/nano-banana-2');
+  const [selectedFalModel, setSelectedFalModel] = useState('fal-ai/nano-banana-2');
+
+  // References
+  const [references, setReferences] = useState([]);
+  const [referencesUploading, setReferencesUploading] = useState(false);
 
   // Generation
   const [currentlyLoading, setCurrentlyLoading] = useState([]);
@@ -131,6 +141,9 @@ const ProjectComponent = ({ projectId }) => {
 
   // Export
   const [canExportClip, setCanExportClip] = useState(false);
+
+  // Share
+  const [shareOpen, setShareOpen] = useState(false);
 
   const [authToken, setAuthToken] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
@@ -386,15 +399,16 @@ const ProjectComponent = ({ projectId }) => {
             'Content-Type': 'application/json',
             Accept: 'application/json',
           },
-          body: JSON.stringify({ prompt: promptText }),
+          body: JSON.stringify({ prompt: promptText, model: selectedFalModel }),
         },
       );
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
+        const required = body.required ?? body.tokenCost;
         const msg =
           body.error ||
           (res.status === 402
-            ? `Not enough tokens (need 8; you have ${body.tokens ?? '?'})`
+            ? `Not enough tokens (need ${required ?? '?'}; you have ${body.tokens ?? '?'})`
             : `Generation failed (${res.status})`);
         throw new Error(msg);
       }
@@ -445,7 +459,7 @@ const ProjectComponent = ({ projectId }) => {
         if (!pd) return;
         setVoiceText('');
         setSelectedScene(pd.scenes.length);
-        setNegativePrompt('');
+        setReferences([]);
         setPrompt('');
       })
       .catch((error) => console.error('Failed to add new scene:', error));
@@ -492,6 +506,28 @@ const ProjectComponent = ({ projectId }) => {
     generateImage(sceneIndex);
   };
 
+  // ---------- Fetch fal model catalog (remote only) ----------
+  useEffect(() => {
+    if (!isRemote || !authToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(apiUrl('/projects/models'), {
+          headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || cancelled) return;
+        if (Array.isArray(body.models)) {
+          setFalModels(body.models);
+          if (body.defaultId) setDefaultFalModelId(body.defaultId);
+        }
+      } catch (e) {
+        console.error('Failed to load fal models:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isRemote, authToken]);
+
   // ---------- Sync scene-bound state when selection changes ----------
   useEffect(() => {
     if (projectData && projectData.scenes[selectedScene - 1]) {
@@ -499,7 +535,8 @@ const ProjectComponent = ({ projectId }) => {
       const currentScene = projectData.scenes[selectedScene - 1];
       setTimeout(() => {
         setPrompt(currentScene.positivePrompt || '');
-        setNegativePrompt(currentScene.negativePrompt || '');
+        setReferences(Array.isArray(currentScene.references) ? currentScene.references : []);
+        setSelectedFalModel(currentScene.model || defaultFalModelId);
         setVoiceText(currentScene.voiceline || '');
         setSpeakerWav(currentScene.speaker || 'Narrator');
         fetchBaseModels();
@@ -550,23 +587,159 @@ const ProjectComponent = ({ projectId }) => {
   );
 
   const updateScenePrompts = useCallback(
-    debounce((positivePrompt, negativePromptValue) => {
+    debounce((positivePrompt) => {
       const scene = projectData?.scenes?.[selectedScene - 1];
       if (!scene?.frameId || !authToken) return;
       patchFrame(scene.frameId, {
         prompt: positivePrompt,
-        negative_prompt: negativePromptValue,
       }).catch((error) => console.error('Failed to update scene prompts:', error));
       setProjectData((prev) => ({
         ...prev,
         scenes: prev.scenes.map((s, i) =>
           i === selectedScene - 1
-            ? { ...s, positivePrompt, negativePrompt: negativePromptValue }
+            ? { ...s, positivePrompt }
             : s,
         ),
       }));
     }, 500),
     [selectedScene, projectData, patchFrame, authToken],
+  );
+
+  const updateSceneFalModel = useCallback(
+    (modelId) => {
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      if (!scene?.frameId || !authToken) return;
+      patchFrame(scene.frameId, { model: modelId }).catch((error) =>
+        console.error('Failed to update scene model:', error),
+      );
+      setProjectData((prev) => ({
+        ...prev,
+        scenes: prev.scenes.map((s, i) =>
+          i === selectedScene - 1 ? { ...s, model: modelId } : s,
+        ),
+      }));
+    },
+    [selectedScene, projectData, patchFrame, authToken],
+  );
+
+  const updateSceneReferences = useCallback(
+    (next) => {
+      setReferences(next);
+      setProjectData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          scenes: prev.scenes.map((s, i) =>
+            i === selectedScene - 1 ? { ...s, references: next } : s,
+          ),
+        };
+      });
+    },
+    [selectedScene],
+  );
+
+  const handleAddReferenceFiles = useCallback(
+    async (files) => {
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      if (!scene?.frameId || !authToken || !projectId) return;
+      setReferencesUploading(true);
+      try {
+        let latest = references;
+        for (const file of files) {
+          const fd = new FormData();
+          fd.append('file', file);
+          const res = await fetch(
+            apiUrl(
+              `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(scene.frameId)}/references`,
+            ),
+            {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${authToken}` },
+              body: fd,
+            },
+          );
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.error || 'Upload failed');
+          if (Array.isArray(body.frame?.reference_urls)) {
+            latest = body.frame.reference_urls;
+            updateSceneReferences(latest);
+          }
+        }
+      } catch (e) {
+        console.error(e);
+        window.alert(e.message || 'Reference upload failed');
+      } finally {
+        setReferencesUploading(false);
+      }
+    },
+    [projectData, selectedScene, authToken, projectId, references, updateSceneReferences],
+  );
+
+  const handleAddReferenceUrl = useCallback(
+    async (url) => {
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      if (!scene?.frameId || !authToken || !projectId) return;
+      setReferencesUploading(true);
+      try {
+        const res = await fetch(
+          apiUrl(
+            `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(scene.frameId)}/references`,
+          ),
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify({ url }),
+          },
+        );
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Upload failed');
+        if (Array.isArray(body.frame?.reference_urls)) {
+          updateSceneReferences(body.frame.reference_urls);
+        }
+      } catch (e) {
+        console.error(e);
+        window.alert(e.message || 'Reference add failed');
+      } finally {
+        setReferencesUploading(false);
+      }
+    },
+    [projectData, selectedScene, authToken, projectId, updateSceneReferences],
+  );
+
+  const handleRemoveReference = useCallback(
+    async (url) => {
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      if (!scene?.frameId || !authToken || !projectId) return;
+      try {
+        const res = await fetch(
+          apiUrl(
+            `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(scene.frameId)}/references`,
+          ),
+          {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify({ url }),
+          },
+        );
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Remove failed');
+        if (Array.isArray(body.frame?.reference_urls)) {
+          updateSceneReferences(body.frame.reference_urls);
+        }
+      } catch (e) {
+        console.error(e);
+        window.alert(e.message || 'Remove failed');
+      }
+    },
+    [projectData, selectedScene, authToken, projectId, updateSceneReferences],
   );
 
   const updateSceneVoiceline = useCallback(
@@ -609,13 +782,13 @@ const ProjectComponent = ({ projectId }) => {
   const handlePromptChange = (event) => {
     const newPrompt = event.target.value;
     setPrompt(newPrompt);
-    updateScenePrompts(newPrompt, negativePrompt);
+    updateScenePrompts(newPrompt);
   };
 
-  const handleNegativePromptChange = (event) => {
-    const newNegativePrompt = event.target.value;
-    setNegativePrompt(newNegativePrompt);
-    updateScenePrompts(prompt, newNegativePrompt);
+  const handleFalModelChange = (event) => {
+    const newId = event.target.value;
+    setSelectedFalModel(newId);
+    updateSceneFalModel(newId);
   };
 
   const handleVoiceTextChange = (event) => {
@@ -948,8 +1121,11 @@ const ProjectComponent = ({ projectId }) => {
     (!isRemote && baseModels.length === 0 && loraModules.length === 0);
 
   return (
+    <>
     <EditorLayout
       onExport={handleExportProject}
+      onShare={() => setShareOpen(true)}
+      showShare={isRemote && Boolean(authToken)}
       leftSidebarProps={{
         baseModel,
         baseModels,
@@ -959,11 +1135,19 @@ const ProjectComponent = ({ projectId }) => {
         loraModules,
         onLoraChange: handleLoraChange,
         onLoraOpen: fetchLoraModules,
+        falModels,
+        selectedFalModel,
+        onFalModelChange: handleFalModelChange,
         prompt,
-        negativePrompt,
         onPromptChange: handlePromptChange,
-        onNegativePromptChange: handleNegativePromptChange,
         isTransitioning,
+        references,
+        onAddReferenceFiles: handleAddReferenceFiles,
+        onAddReferenceUrl: handleAddReferenceUrl,
+        onRemoveReference: handleRemoveReference,
+        referencesUploading,
+        modelSupportsReferences:
+          falModels.find((m) => m.id === selectedFalModel)?.supportsReferences ?? true,
         sceneDuration,
         generateLabel: generateImageText[selectedScene] || 'Generate Visuals',
         generateDisabled,
@@ -978,9 +1162,7 @@ const ProjectComponent = ({ projectId }) => {
           progress: progressMap[selectedScene],
           fact: currentFact,
           prompt,
-          negativePrompt,
           onPromptChange: handlePromptChange,
-          onNegativePromptChange: handleNegativePromptChange,
           generateDisabled:
             prompt.trim() === '' ||
             currentlyLoading.includes(selectedScene) ||
@@ -1059,6 +1241,14 @@ const ProjectComponent = ({ projectId }) => {
         onAddSceneMouseLeave: () => setPressedAddScene(false),
       }}
     />
+    {shareOpen ? (
+      <ShareModal
+        projectId={projectId}
+        authToken={authToken}
+        onClose={() => setShareOpen(false)}
+      />
+    ) : null}
+    </>
   );
 };
 

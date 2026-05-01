@@ -20,9 +20,7 @@ const ScenePreview = ({
   progress,
   fact,
   prompt,
-  negativePrompt,
   onPromptChange,
-  onNegativePromptChange,
   generateDisabled,
   onGenerate,
 }) => {
@@ -60,14 +58,11 @@ const ScenePreview = ({
     );
   }
 
-  /* No frame asset yet: original compose UI (positive / negative / Generate), plus loading UI when generating. */
   return (
     <ScenePlaceholder
       aspectRatio={aspectRatio}
       prompt={prompt}
-      negativePrompt={negativePrompt}
       onPromptChange={onPromptChange}
-      onNegativePromptChange={onNegativePromptChange}
       generateDisabled={generateDisabled}
       onGenerate={onGenerate}
       isLoading={isLoading}

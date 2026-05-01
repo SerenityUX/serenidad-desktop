@@ -3,9 +3,7 @@ import React from 'react';
 const ScenePlaceholder = ({
   aspectRatio,
   prompt,
-  negativePrompt,
   onPromptChange,
-  onNegativePromptChange,
   generateDisabled,
   onGenerate,
   isLoading,
@@ -39,25 +37,14 @@ const ScenePlaceholder = ({
         flexDirection: 'column',
       }}>
         <p style={{ fontSize: 24, marginTop: 0, marginBottom: 20 }}>Scene Visual</p>
-        <div style={{ display: 'flex', width: '100%', gap: 12, flexDirection: 'row' }}>
-          <div style={{ display: 'flex', width: 'calc(100% - 16px)', alignItems: 'start', flexDirection: 'column' }}>
-            <p className="labelTop">POSITIVE PROMPT</p>
-            <textarea
-              value={prompt}
-              style={{ width: 'calc(100% - 16px)', fontSize: 14, maxWidth: 250 }}
-              onChange={onPromptChange}
-              placeholder="Positive Prompt..."
-            />
-          </div>
-          <div style={{ display: 'flex', width: 'calc(100% - 16px)', alignItems: 'start', flexDirection: 'column' }}>
-            <p className="labelTop">NEGATIVE PROMPT</p>
-            <textarea
-              value={negativePrompt}
-              style={{ width: 'calc(100% - 16px)', fontSize: 14, maxWidth: 250 }}
-              onChange={onNegativePromptChange}
-              placeholder="Negative Prompt..."
-            />
-          </div>
+        <div style={{ display: 'flex', width: '100%', flexDirection: 'column' }}>
+          <p className="labelTop">POSITIVE PROMPT</p>
+          <textarea
+            value={prompt}
+            style={{ width: '100%', fontSize: 14 }}
+            onChange={onPromptChange}
+            placeholder="Positive Prompt..."
+          />
         </div>
         <button
           disabled={generateDisabled}

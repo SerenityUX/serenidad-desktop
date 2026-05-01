@@ -1,8 +1,15 @@
 const express = require("express");
+const crypto = require("crypto");
+const multer = require("multer");
 const { isProbablyAssetUrl } = require("../lib/assetUrl");
-const { generateNanoBananaImage } = require("../lib/falNanoBanana");
-
-const IMAGE_GEN_TOKEN_COST = 8;
+const { generateFalImage } = require("../lib/falImage");
+const {
+  FAL_IMAGE_MODELS,
+  DEFAULT_MODEL_ID,
+  resolveModelOrDefault,
+} = require("../lib/falModels");
+const { putProfileImage } = require("../lib/s3Upload");
+const { sendProjectShareEmail } = require("../lib/email");
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -10,6 +17,27 @@ const UUID_RE =
 function isUuid(s) {
   return typeof s === "string" && UUID_RE.test(s);
 }
+
+const FRAME_COLUMNS = `id, prompt, result, reference_urls, model, meta, created_at`;
+
+const REFERENCE_MIME_EXT = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+};
+
+const referenceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (REFERENCE_MIME_EXT[String(file.mimetype || "").toLowerCase()]) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only JPEG, PNG, WebP, or GIF images are allowed"));
+    }
+  },
+});
 
 async function getProjectIfAccessible(pool, projectId, userId) {
   const r = await pool.query(
@@ -39,6 +67,18 @@ async function getProjectIfAccessible(pool, projectId, userId) {
 module.exports = function createProjectsRouter(pool, requireAuth) {
   const router = express.Router();
   router.use(requireAuth);
+
+  router.get("/models", (_req, res) => {
+    res.json({
+      models: FAL_IMAGE_MODELS.map((m) => ({
+        id: m.id,
+        label: m.label,
+        costCents: m.costCents,
+        supportsReferences: m.supportsReferences,
+      })),
+      defaultId: DEFAULT_MODEL_ID,
+    });
+  });
 
   router.get("/", async (req, res) => {
     try {
@@ -105,16 +145,16 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       );
       const row = ins.rows[0];
       const f1 = await client.query(
-        `INSERT INTO frames (project_id, prompt, result)
-         VALUES ($1, '', NULL)
+        `INSERT INTO frames (project_id, prompt, result, model)
+         VALUES ($1, '', NULL, $2)
          RETURNING id`,
-        [row.id],
+        [row.id, DEFAULT_MODEL_ID],
       );
       const f2 = await client.query(
-        `INSERT INTO frames (project_id, prompt, result)
-         VALUES ($1, '', NULL)
+        `INSERT INTO frames (project_id, prompt, result, model)
+         VALUES ($1, '', NULL, $2)
          RETURNING id`,
-        [row.id],
+        [row.id, DEFAULT_MODEL_ID],
       );
       const frameIds = [f1.rows[0].id, f2.rows[0].id];
       await client.query(
@@ -150,11 +190,21 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       sets.push(`prompt = $${pi++}`);
       vals.push(patch.prompt == null ? "" : String(patch.prompt));
     }
-    if (Object.prototype.hasOwnProperty.call(patch, "negative_prompt")) {
-      sets.push(`negative_prompt = $${pi++}`);
-      vals.push(
-        patch.negative_prompt == null ? "" : String(patch.negative_prompt),
-      );
+    if (Object.prototype.hasOwnProperty.call(patch, "model")) {
+      const m = patch.model == null ? null : String(patch.model);
+      if (m && !resolveModelOrDefault(m)) {
+        return res.status(400).json({ error: "Unknown model id" });
+      }
+      sets.push(`model = $${pi++}`);
+      vals.push(m);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "reference_urls")) {
+      const arr = Array.isArray(patch.reference_urls) ? patch.reference_urls : [];
+      const cleaned = arr
+        .map((u) => String(u || "").trim())
+        .filter((u) => u && isProbablyAssetUrl(u));
+      sets.push(`reference_urls = $${pi++}::text[]`);
+      vals.push(cleaned);
     }
     if (Object.prototype.hasOwnProperty.call(patch, "result")) {
       const r = patch.result;
@@ -180,7 +230,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       const u = await pool.query(
         `UPDATE frames SET ${sets.join(", ")}
          WHERE id = $${idPh} AND project_id = $${projPh}
-         RETURNING id, prompt, negative_prompt, result, meta, created_at`,
+         RETURNING ${FRAME_COLUMNS}`,
         vals,
       );
       if (u.rows.length === 0) {
@@ -190,6 +240,115 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     } catch (e) {
       console.error(e);
       return res.status(500).json({ error: "Could not update frame" });
+    }
+  });
+
+  router.post(
+    "/:projectId/frames/:frameId/references",
+    (req, res, next) => {
+      referenceUpload.single("file")(req, res, (err) => {
+        if (err) {
+          return res.status(400).json({
+            error:
+              err.message ||
+              (typeof err === "string" ? err : "Upload failed"),
+          });
+        }
+        next();
+      });
+    },
+    async (req, res) => {
+      const { projectId, frameId } = req.params;
+      if (!isUuid(projectId) || !isUuid(frameId)) {
+        return res.status(400).json({ error: "Invalid id" });
+      }
+      const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+      if (!proj) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      const frameCheck = await pool.query(
+        `SELECT id FROM frames WHERE id = $1 AND project_id = $2`,
+        [frameId, projectId],
+      );
+      if (frameCheck.rows.length === 0) {
+        return res.status(404).json({ error: "Frame not found" });
+      }
+
+      let storedUrl;
+      const bodyUrl =
+        typeof req.body?.url === "string" ? req.body.url.trim() : "";
+
+      if (req.file?.buffer) {
+        const ext =
+          REFERENCE_MIME_EXT[String(req.file.mimetype).toLowerCase()];
+        if (!ext) {
+          return res.status(400).json({ error: "Unsupported image type" });
+        }
+        const key = `references/${req.user.id}/${frameId}/${crypto.randomUUID()}${ext}`;
+        try {
+          storedUrl = await putProfileImage({
+            key,
+            body: req.file.buffer,
+            contentType: req.file.mimetype,
+          });
+        } catch (e) {
+          console.error(e);
+          return res.status(503).json({ error: "Could not upload reference" });
+        }
+      } else if (bodyUrl && isProbablyAssetUrl(bodyUrl)) {
+        storedUrl = bodyUrl;
+      } else {
+        return res
+          .status(400)
+          .json({ error: "Provide a file or an HTTPS url" });
+      }
+
+      try {
+        const u = await pool.query(
+          `UPDATE frames
+           SET reference_urls = COALESCE(reference_urls, '{}'::text[]) || ARRAY[$1::text]
+           WHERE id = $2 AND project_id = $3
+           RETURNING ${FRAME_COLUMNS}`,
+          [storedUrl, frameId, projectId],
+        );
+        return res.json({ frame: u.rows[0], url: storedUrl });
+      } catch (e) {
+        console.error(e);
+        return res.status(500).json({ error: "Could not save reference" });
+      }
+    },
+  );
+
+  router.delete("/:projectId/frames/:frameId/references", async (req, res) => {
+    const { projectId, frameId } = req.params;
+    if (!isUuid(projectId) || !isUuid(frameId)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    if (!proj) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const url =
+      typeof req.body?.url === "string" ? req.body.url.trim() : "";
+    if (!url) {
+      return res.status(400).json({ error: "url is required" });
+    }
+    try {
+      const u = await pool.query(
+        `UPDATE frames
+         SET reference_urls = array_remove(COALESCE(reference_urls, '{}'::text[]), $1::text)
+         WHERE id = $2 AND project_id = $3
+         RETURNING ${FRAME_COLUMNS}`,
+        [url, frameId, projectId],
+      );
+      if (u.rows.length === 0) {
+        return res.status(404).json({ error: "Frame not found" });
+      }
+      return res.json({ frame: u.rows[0] });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Could not remove reference" });
     }
   });
 
@@ -208,12 +367,27 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     }
 
     const frameCheck = await pool.query(
-      `SELECT id FROM frames WHERE id = $1 AND project_id = $2`,
+      `SELECT id, model, reference_urls FROM frames WHERE id = $1 AND project_id = $2`,
       [frameId, projectId],
     );
     if (frameCheck.rows.length === 0) {
       return res.status(404).json({ error: "Frame not found" });
     }
+    const frameRow = frameCheck.rows[0];
+
+    const requestedModelId =
+      String(req.body?.model || "").trim() ||
+      frameRow.model ||
+      DEFAULT_MODEL_ID;
+    const model = resolveModelOrDefault(requestedModelId);
+    if (!model) {
+      return res.status(400).json({ error: "Unknown model id" });
+    }
+
+    const tokenCost = Math.max(1, Math.ceil(model.costCents));
+    const referenceUrls = Array.isArray(frameRow.reference_urls)
+      ? frameRow.reference_urls
+      : [];
 
     const debitClient = await pool.connect();
     try {
@@ -223,12 +397,12 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
         [req.user.id],
       );
       const current = bal.rows[0]?.tokens ?? 0;
-      if (current < IMAGE_GEN_TOKEN_COST) {
+      if (current < tokenCost) {
         await debitClient.query("ROLLBACK");
         return res.status(402).json({
           error: "Insufficient tokens",
           tokens: current,
-          required: IMAGE_GEN_TOKEN_COST,
+          required: tokenCost,
         });
       }
       await debitClient.query(
@@ -236,9 +410,9 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
          VALUES ($1, $2, $3, $4)`,
         [
           req.user.id,
-          -IMAGE_GEN_TOKEN_COST,
+          -tokenCost,
           "Image generation",
-          `nano-banana-2 frame ${frameId}`,
+          `${model.id} frame ${frameId}`,
         ],
       );
       await debitClient.query("COMMIT");
@@ -250,99 +424,82 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     }
     debitClient.release();
 
-    let imageUrl;
-    try {
-      imageUrl = await generateNanoBananaImage({
-        prompt,
-        width: proj.width,
-        height: proj.height,
-      });
-    } catch (falErr) {
-      console.error(falErr);
+    const refundTokens = async (notes) => {
       try {
         await pool.query(
           `INSERT INTO transactions (user_id, delta, name, notes)
            VALUES ($1, $2, $3, $4)`,
-          [
-            req.user.id,
-            IMAGE_GEN_TOKEN_COST,
-            "Refund",
-            String(falErr.message || "fal generation failed").slice(0, 500),
-          ],
+          [req.user.id, tokenCost, "Refund", String(notes || "").slice(0, 500)],
         );
       } catch (refundErr) {
         console.error(refundErr);
       }
+    };
+
+    let imageUrl;
+    try {
+      const out = await generateFalImage({
+        modelId: model.id,
+        prompt,
+        width: proj.width,
+        height: proj.height,
+        referenceUrls,
+      });
+      imageUrl = out.url;
+    } catch (falErr) {
+      console.error(falErr);
+      await refundTokens(falErr.message || "fal generation failed");
       return res.status(502).json({
         error: String(falErr.message || "Image generation failed"),
       });
     }
 
     if (!isProbablyAssetUrl(imageUrl)) {
-      try {
-        await pool.query(
-          `INSERT INTO transactions (user_id, delta, name, notes)
-           VALUES ($1, $2, $3, $4)`,
-          [
-            req.user.id,
-            IMAGE_GEN_TOKEN_COST,
-            "Refund",
-            "Invalid image URL from provider",
-          ],
-        );
-      } catch (refundErr) {
-        console.error(refundErr);
-      }
+      await refundTokens("Invalid image URL from provider");
       return res.status(502).json({ error: "Invalid image URL from provider" });
     }
 
+    const saveClient = await pool.connect();
+    let savedFrameRow = null;
     try {
-      const upd = await pool.query(
+      await saveClient.query("BEGIN");
+      const upd = await saveClient.query(
         `UPDATE frames
-         SET prompt = $1, result = $2
-         WHERE id = $3 AND project_id = $4
-         RETURNING id, prompt, negative_prompt, result, meta, created_at`,
-        [prompt, imageUrl, frameId, projectId],
+         SET prompt = $1, result = $2, model = $3
+         WHERE id = $4 AND project_id = $5
+         RETURNING ${FRAME_COLUMNS}`,
+        [prompt, imageUrl, model.id, frameId, projectId],
       );
       if (upd.rows.length === 0) {
-        await pool.query(
-          `INSERT INTO transactions (user_id, delta, name, notes)
-           VALUES ($1, $2, $3, $4)`,
-          [
-            req.user.id,
-            IMAGE_GEN_TOKEN_COST,
-            "Refund",
-            "Frame row missing after generation",
-          ],
-        );
+        await saveClient.query("ROLLBACK");
+        await refundTokens("Frame row missing after generation");
         return res.status(404).json({ error: "Frame not found" });
       }
-      const tokRow = await pool.query(
-        `SELECT tokens FROM users WHERE id = $1`,
-        [req.user.id],
+      await saveClient.query(
+        `UPDATE projects SET thumbnail = $1 WHERE id = $2`,
+        [imageUrl, projectId],
       );
-      return res.json({
-        frame: upd.rows[0],
-        tokens: tokRow.rows[0]?.tokens ?? 0,
-      });
+      await saveClient.query("COMMIT");
+      savedFrameRow = upd.rows[0];
     } catch (e) {
       console.error(e);
-      try {
-        await pool.query(
-          `INSERT INTO transactions (user_id, delta, name, notes)
-           VALUES ($1, $2, $3, $4)`,
-          [
-            req.user.id,
-            IMAGE_GEN_TOKEN_COST,
-            "Refund",
-            String(e.message || "save failed").slice(0, 500),
-          ],
-        );
-      } catch (refundErr) {
-        console.error(refundErr);
-      }
+      await saveClient.query("ROLLBACK").catch(() => {});
+      await refundTokens(e.message || "save failed");
       return res.status(500).json({ error: "Could not save frame" });
+    } finally {
+      saveClient.release();
     }
+
+    const tokRow = await pool.query(`SELECT tokens FROM users WHERE id = $1`, [
+      req.user.id,
+    ]);
+    return res.json({
+      frame: savedFrameRow,
+      tokens: tokRow.rows[0]?.tokens ?? 0,
+      projectThumbnail: imageUrl,
+      tokenCost,
+      model: { id: model.id, label: model.label, costCents: model.costCents },
+    });
   });
 
   router.post("/:projectId/frames", async (req, res) => {
@@ -358,10 +515,10 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     try {
       await client.query("BEGIN");
       const ins = await client.query(
-        `INSERT INTO frames (project_id, prompt, result)
-         VALUES ($1, '', NULL)
+        `INSERT INTO frames (project_id, prompt, result, model)
+         VALUES ($1, '', NULL, $2)
          RETURNING id`,
-        [projectId],
+        [projectId, DEFAULT_MODEL_ID],
       );
       const newId = ins.rows[0].id;
       await client.query(
@@ -372,7 +529,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       );
       await client.query("COMMIT");
       const full = await pool.query(
-        `SELECT id, prompt, negative_prompt, result, meta, created_at
+        `SELECT ${FRAME_COLUMNS}
          FROM frames WHERE id = $1`,
         [newId],
       );
@@ -433,7 +590,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       }
       let framesRows;
       const frames = await pool.query(
-        `SELECT id, prompt, negative_prompt, result, meta, created_at
+        `SELECT ${FRAME_COLUMNS}
          FROM frames
          WHERE project_id = $1
          ORDER BY COALESCE(array_position($2::uuid[], id), 2147483647), created_at`,
@@ -441,18 +598,17 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       );
       framesRows = frames.rows;
 
-      /* Older API-created projects may have no frame rows yet; seed two for the editor. */
       if (framesRows.length === 0 && proj.owner_id === req.user.id) {
         const client = await pool.connect();
         try {
           await client.query("BEGIN");
           const f1 = await client.query(
-            `INSERT INTO frames (project_id, prompt, result) VALUES ($1, '', NULL) RETURNING id`,
-            [id],
+            `INSERT INTO frames (project_id, prompt, result, model) VALUES ($1, '', NULL, $2) RETURNING id`,
+            [id, DEFAULT_MODEL_ID],
           );
           const f2 = await client.query(
-            `INSERT INTO frames (project_id, prompt, result) VALUES ($1, '', NULL) RETURNING id`,
-            [id],
+            `INSERT INTO frames (project_id, prompt, result, model) VALUES ($1, '', NULL, $2) RETURNING id`,
+            [id, DEFAULT_MODEL_ID],
           );
           const seededIds = [f1.rows[0].id, f2.rows[0].id];
           await client.query(
@@ -462,7 +618,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
           await client.query("COMMIT");
           proj.frame_ids = seededIds;
           const again = await pool.query(
-            `SELECT id, prompt, negative_prompt, result, meta, created_at
+            `SELECT ${FRAME_COLUMNS}
              FROM frames
              WHERE project_id = $1
              ORDER BY COALESCE(array_position($2::uuid[], id), 2147483647), created_at`,
@@ -481,6 +637,107 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     } catch (e) {
       console.error(e);
       return res.status(500).json({ error: "Could not load project" });
+    }
+  });
+
+  router.get("/:projectId/shares", async (req, res) => {
+    const { projectId } = req.params;
+    if (!isUuid(projectId)) {
+      return res.status(400).json({ error: "Invalid project id" });
+    }
+    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    if (!proj) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    try {
+      const r = await pool.query(
+        `SELECT u.id, u.name, u.email, u.profile_picture
+         FROM invites i
+         JOIN users u ON u.id = i.sent_to
+         WHERE i.project_id = $1
+         ORDER BY u.email`,
+        [projectId],
+      );
+      return res.json({ shares: r.rows });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Could not load shares" });
+    }
+  });
+
+  router.post("/:projectId/share", async (req, res) => {
+    const { projectId } = req.params;
+    if (!isUuid(projectId)) {
+      return res.status(400).json({ error: "Invalid project id" });
+    }
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ error: "Invalid email" });
+    }
+
+    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    if (!proj) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    try {
+      const recipient = await pool.query(
+        `SELECT id, name, email FROM users WHERE email = $1`,
+        [email],
+      );
+      if (recipient.rows.length === 0) {
+        return res
+          .status(404)
+          .json({ error: "No Kōdan account found for that email" });
+      }
+      const recipientRow = recipient.rows[0];
+
+      if (recipientRow.id === proj.owner_id) {
+        return res
+          .status(400)
+          .json({ error: "Owner already has access to this project" });
+      }
+      if (recipientRow.id === req.user.id) {
+        return res
+          .status(400)
+          .json({ error: "You cannot share a project with yourself" });
+      }
+
+      const existing = await pool.query(
+        `SELECT id FROM invites WHERE project_id = $1 AND sent_to = $2`,
+        [projectId, recipientRow.id],
+      );
+      const alreadyShared = existing.rows.length > 0;
+
+      if (!alreadyShared) {
+        await pool.query(
+          `INSERT INTO invites (sent_from, sent_to, project_id)
+           VALUES ($1, $2, $3)`,
+          [req.user.id, recipientRow.id, projectId],
+        );
+      }
+
+      try {
+        await sendProjectShareEmail({
+          to: recipientRow.email,
+          projectName: proj.name,
+          sharerName: req.user.name,
+          sharerEmail: req.user.email,
+        });
+      } catch (mailErr) {
+        console.error("Resend:", mailErr.message);
+        return res.status(200).json({
+          ok: true,
+          alreadyShared,
+          emailed: false,
+          warning: "Shared, but notification email could not be sent",
+        });
+      }
+
+      return res.json({ ok: true, alreadyShared, emailed: true });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Could not share project" });
     }
   });
 

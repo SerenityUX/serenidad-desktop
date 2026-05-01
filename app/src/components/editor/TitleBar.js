@@ -1,4 +1,6 @@
 import React from 'react';
+import ProfileAvatarMenu from '../ProfileAvatarMenu';
+import { useAuth } from '../../context/AuthContext';
 
 const TrafficLight = ({ color, action }) => (
   <div
@@ -14,7 +16,7 @@ const TrafficLight = ({ color, action }) => (
   />
 );
 
-const TitleBar = ({ onExport, showExport = true }) => (
+const TitleBar = ({ onExport, onShare, showExport = true, showShare = false }) => (
   <div style={{
     width: '100%',
     display: 'flex',
@@ -33,7 +35,26 @@ const TitleBar = ({ onExport, showExport = true }) => (
 
     <p style={{ fontWeight: 500, WebkitAppRegion: 'drag' }}>Kōdan</p>
 
-    <div>
+    <div style={{ display: 'flex', gap: 8, marginRight: 12 }}>
+      {showShare && (
+        <button
+          onClick={onShare}
+          style={{
+            backgroundColor: '#fff',
+            color: '#1F93FF',
+            paddingLeft: 8,
+            paddingRight: 8,
+            border: '1px solid #1F93FF',
+            borderRadius: 4,
+            paddingTop: 4,
+            paddingBottom: 4,
+            cursor: 'pointer',
+            WebkitAppRegion: 'no-drag',
+          }}
+        >
+          Share
+        </button>
+      )}
       {showExport && (
         <button
           onClick={onExport}
@@ -44,7 +65,6 @@ const TitleBar = ({ onExport, showExport = true }) => (
             paddingRight: 8,
             border: '0px',
             borderRadius: 4,
-            marginRight: 12,
             paddingTop: 4,
             paddingBottom: 4,
             WebkitAppRegion: 'no-drag',

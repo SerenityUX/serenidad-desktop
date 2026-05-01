@@ -19,13 +19,7 @@ const textareaStyle = (isTransitioning) => ({
   opacity: isTransitioning ? 0 : 1,
 });
 
-const PromptSection = ({
-  prompt,
-  negativePrompt,
-  onPromptChange,
-  onNegativePromptChange,
-  isTransitioning,
-}) => (
+const PromptSection = ({ prompt, onPromptChange, isTransitioning }) => (
   <>
     <SectionHeader icon="icons/Prompt.svg" label="Prompt" />
 
@@ -35,16 +29,6 @@ const PromptSection = ({
         value={prompt}
         onChange={onPromptChange}
         placeholder="Positive Prompt..."
-        style={textareaStyle(isTransitioning)}
-      />
-    </div>
-
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
-      <FieldLabel>NEGATIVE PROMPT</FieldLabel>
-      <textarea
-        value={negativePrompt}
-        onChange={onNegativePromptChange}
-        placeholder="Negative Prompt..."
         style={textareaStyle(isTransitioning)}
       />
     </div>

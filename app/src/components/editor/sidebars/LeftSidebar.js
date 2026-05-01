@@ -1,6 +1,7 @@
 import React from 'react';
 import StyleSection from './StyleSection';
 import PromptSection from './PromptSection';
+import ReferencesSection from './ReferencesSection';
 import DurationSection from './DurationSection';
 import GenerateVisualsButton from './GenerateVisualsButton';
 import Divider from '../shared/Divider';
@@ -14,11 +15,18 @@ const LeftSidebar = ({
   loraModules,
   onLoraChange,
   onLoraOpen,
+  falModels,
+  selectedFalModel,
+  onFalModelChange,
   prompt,
-  negativePrompt,
   onPromptChange,
-  onNegativePromptChange,
   isTransitioning,
+  references,
+  onAddReferenceFiles,
+  onAddReferenceUrl,
+  onRemoveReference,
+  referencesUploading,
+  modelSupportsReferences,
   sceneDuration,
   generateLabel,
   generateDisabled,
@@ -46,16 +54,28 @@ const LeftSidebar = ({
         loraModules={loraModules}
         onLoraChange={onLoraChange}
         onLoraOpen={onLoraOpen}
+        falModels={falModels}
+        selectedFalModel={selectedFalModel}
+        onFalModelChange={onFalModelChange}
       />
 
       <Divider />
 
       <PromptSection
         prompt={prompt}
-        negativePrompt={negativePrompt}
         onPromptChange={onPromptChange}
-        onNegativePromptChange={onNegativePromptChange}
         isTransitioning={isTransitioning}
+      />
+
+      <Divider />
+
+      <ReferencesSection
+        references={references}
+        onAddFiles={onAddReferenceFiles}
+        onAddUrl={onAddReferenceUrl}
+        onRemove={onRemoveReference}
+        uploading={referencesUploading}
+        modelSupportsReferences={modelSupportsReferences}
       />
 
       <DurationSection sceneDuration={sceneDuration} />

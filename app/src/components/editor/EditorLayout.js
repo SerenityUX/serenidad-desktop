@@ -7,6 +7,8 @@ import ScenesStrip from './bottomBar/ScenesStrip';
 
 const EditorLayout = ({
   onExport,
+  onShare,
+  showShare = false,
   leftSidebarProps,
   centerStageProps,
   rightSidebarProps,
@@ -23,7 +25,7 @@ const EditorLayout = ({
     alignItems: 'center',
     justifyContent: 'space-between',
   }}>
-    <TitleBar onExport={onExport} />
+    <TitleBar onExport={onExport} onShare={onShare} showShare={showShare} />
 
     <div style={{ display: 'flex', width: '100%', height: 'calc(100% - 175px)' }}>
       <LeftSidebar {...leftSidebarProps} />

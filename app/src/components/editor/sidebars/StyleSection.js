@@ -16,6 +16,14 @@ const selectStyle = {
   color: '#404040',
 };
 
+const helperStyle = {
+  marginLeft: 12,
+  marginRight: 12,
+  marginTop: 4,
+  fontSize: 11,
+  color: '#808080',
+};
+
 const StyleSection = ({
   baseModel,
   baseModels,
@@ -25,46 +33,79 @@ const StyleSection = ({
   loraModules,
   onLoraChange,
   onLoraOpen,
-}) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-    <SectionHeader icon="icons/Picture.svg" label="Style" />
+  falModels,
+  selectedFalModel,
+  onFalModelChange,
+}) => {
+  const showFal = Array.isArray(falModels) && falModels.length > 0;
+  const showLocal = Array.isArray(baseModels) && baseModels.length > 0;
+  const activeFalModel =
+    showFal && falModels.find((m) => m.id === selectedFalModel);
 
-    <div
-      data-tooltip-id="base-model-tooltip"
-      data-tooltip-content="A base model is a pre-trained AI model that serves as the foundation for generating images. It contains general knowledge about visual concepts and styles."
-      style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}
-    >
-      <FieldLabel>BASE MODEL</FieldLabel>
-      <select value={baseModel} onChange={onBaseModelChange} onClick={onBaseModelOpen} style={selectStyle}>
-        {baseModels.length === 0 && <option>Select Base Model</option>}
-        {baseModels.map((model) => (
-          <option key={model} value={model}>{model}</option>
-        ))}
-        <option value="manage">Manage Base Models</option>
-      </select>
-    </div>
-    {baseModels.length === 0 && (
-      <Tooltip id="base-model-tooltip" place="top" type="dark" effect="solid" style={{ maxWidth: '300px' }} />
-    )}
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <SectionHeader icon="icons/Picture.svg" label="Style" />
 
-    <div
-      data-tooltip-id="lora-model-tooltip"
-      data-tooltip-content="A LoRA (Low-Rank Adaptation) module is a fine-tuning technique that allows for efficient adaptation of large language models. It can be used to specialize a base model for specific styles or subjects."
-      style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}
-    >
-      <FieldLabel>LORA MODULE</FieldLabel>
-      <select value={selectedLora} onChange={onLoraChange} onClick={onLoraOpen} style={selectStyle}>
-        {loraModules.length === 0 && <option>Select LoRa</option>}
-        {loraModules.map((module) => (
-          <option key={module} value={module}>{module}</option>
-        ))}
-        <option value="manage">Manage LoRa Modules</option>
-      </select>
-      {loraModules.length === 0 && (
-        <Tooltip id="lora-model-tooltip" place="top" type="dark" effect="solid" style={{ maxWidth: '300px' }} />
+      {showFal && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+          <FieldLabel>MODEL</FieldLabel>
+          <select
+            value={selectedFalModel || ''}
+            onChange={onFalModelChange}
+            style={selectStyle}
+          >
+            {falModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label} — {m.costCents}¢ / image
+              </option>
+            ))}
+          </select>
+          {activeFalModel && (
+            <div style={helperStyle}>
+              {activeFalModel.costCents} token{activeFalModel.costCents === 1 ? '' : 's'} per generation
+              {activeFalModel.supportsReferences ? ' · supports references' : ' · ignores references'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showLocal && (
+        <div
+          data-tooltip-id="base-model-tooltip"
+          data-tooltip-content="A base model is a pre-trained AI model that serves as the foundation for generating images."
+          style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}
+        >
+          <FieldLabel>BASE MODEL</FieldLabel>
+          <select value={baseModel} onChange={onBaseModelChange} onClick={onBaseModelOpen} style={selectStyle}>
+            {baseModels.map((model) => (
+              <option key={model} value={model}>{model}</option>
+            ))}
+            <option value="manage">Manage Base Models</option>
+          </select>
+        </div>
+      )}
+
+      {showLocal && (
+        <div
+          data-tooltip-id="lora-model-tooltip"
+          data-tooltip-content="A LoRA module fine-tunes a base model for specific styles or subjects."
+          style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}
+        >
+          <FieldLabel>LORA MODULE</FieldLabel>
+          <select value={selectedLora} onChange={onLoraChange} onClick={onLoraOpen} style={selectStyle}>
+            {loraModules.length === 0 && <option>Select LoRa</option>}
+            {loraModules.map((module) => (
+              <option key={module} value={module}>{module}</option>
+            ))}
+            <option value="manage">Manage LoRa Modules</option>
+          </select>
+          {loraModules.length === 0 && (
+            <Tooltip id="lora-model-tooltip" place="top" type="dark" effect="solid" style={{ maxWidth: '300px' }} />
+          )}
+        </div>
       )}
     </div>
-  </div>
-);
+  );
+};
 
 export default StyleSection;
