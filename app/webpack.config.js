@@ -15,6 +15,8 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: '[name].bundle.js',  // Output each entry point's bundle with its name
+    // Required for Electron loadFile(file://.../dist/index.html) — avoids broken chunk/asset URLs
+    publicPath: './',
   },
   module: {
     rules: [

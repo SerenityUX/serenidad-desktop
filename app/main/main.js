@@ -528,6 +528,18 @@ function createWindow() {
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
     console.error('Failed to load:', errorCode, errorDescription);
   });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('Renderer process gone:', details.reason, details.exitCode);
+  });
+
+  // Electron loads file:// UI — port 3000 is only for your Express API, not this window.
+  // Blank screen? Run: OPEN_DEVTOOLS=1 npm start  (see Console / Network tabs)
+  if (process.env.OPEN_DEVTOOLS === '1') {
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow.webContents.openDevTools({ mode: 'detach' });
+    });
+  }
 }
 
 function createModalWindow() {

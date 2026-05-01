@@ -1,5 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
+const multer = require("multer");
 const {
   generateOtpDigits,
   hashOtp,
@@ -7,6 +8,19 @@ const {
   OTP_TTL_MS,
 } = require("../lib/otp");
 const { sendOtpEmail } = require("../lib/email");
+const { putProfileImage } = require("../lib/s3Upload");
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\/(jpeg|png|webp|gif)$/i.test(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only JPEG, PNG, WebP, or GIF images are allowed"));
+    }
+  },
+});
 
 module.exports = function createAuthRouter(pool, requireAuth) {
   const router = express.Router();
@@ -190,6 +204,73 @@ module.exports = function createAuthRouter(pool, requireAuth) {
   router.get("/me", requireAuth, (req, res) => {
     res.json({ user: req.user });
   });
+
+  router.post(
+    "/profile-picture",
+    requireAuth,
+    (req, res, next) => {
+      upload.single("file")(req, res, (err) => {
+        if (err) {
+          return res.status(400).json({
+            error:
+              err.message ||
+              (typeof err === "string" ? err : "Upload failed"),
+          });
+        }
+        next();
+      });
+    },
+    async (req, res) => {
+      if (!req.file?.buffer) {
+        return res.status(400).json({ error: "Missing file" });
+      }
+
+      const extMap = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+      };
+      const ext = extMap[req.file.mimetype.toLowerCase()];
+      if (!ext) {
+        return res.status(400).json({ error: "Unsupported image type" });
+      }
+
+      const userId = req.user.id;
+      const key = `profiles/${userId}/${crypto.randomUUID()}${ext}`;
+
+      try {
+        const url = await putProfileImage({
+          key,
+          body: req.file.buffer,
+          contentType: req.file.mimetype,
+        });
+        const upd = await pool.query(
+          `UPDATE users SET profile_picture = $1 WHERE id = $2
+           RETURNING id, name, email, profile_picture, created_at`,
+          [url, userId],
+        );
+        const row = upd.rows[0];
+        res.json({
+          user: {
+            id: row.id,
+            name: row.name,
+            email: row.email,
+            profile_picture: row.profile_picture,
+            created_at: row.created_at,
+          },
+        });
+      } catch (e) {
+        console.error(e);
+        const msg =
+          String(e.message || "").includes("S3_BUCKET") ||
+          String(e.message || "").includes("Object storage")
+            ? "File storage is not configured"
+            : "Could not upload profile picture";
+        res.status(503).json({ error: msg });
+      }
+    },
+  );
 
   return router;
 };

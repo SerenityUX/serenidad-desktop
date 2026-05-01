@@ -9,8 +9,21 @@ import React, {
 import { apiUrl } from "../config";
 
 const TOKEN_KEY = "serenidad_auth_token";
+const USER_KEY = "serenidad_auth_user";
 
 const AuthContext = createContext(null);
+
+function readCachedUser() {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    if (!raw) {
+      return null;
+    }
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
 
 export function AuthProvider({ children }) {
   const [token, setTokenState] = useState(() =>
@@ -18,8 +31,28 @@ export function AuthProvider({ children }) {
       ? localStorage.getItem(TOKEN_KEY)
       : null,
   );
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    if (typeof localStorage === "undefined") {
+      return null;
+    }
+    if (!localStorage.getItem(TOKEN_KEY)) {
+      return null;
+    }
+    return readCachedUser();
+  });
   const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      try {
+        localStorage.setItem(USER_KEY, JSON.stringify(user));
+      } catch {
+        /* ignore quota */
+      }
+    } else {
+      localStorage.removeItem(USER_KEY);
+    }
+  }, [user]);
 
   const persistToken = useCallback((t) => {
     if (t) {
@@ -30,24 +63,41 @@ export function AuthProvider({ children }) {
     setTokenState(t);
   }, []);
 
+  const clearSession = useCallback(() => {
+    localStorage.removeItem(USER_KEY);
+    persistToken(null);
+    setUser(null);
+  }, [persistToken]);
+
   const loadMe = useCallback(
     async (authToken) => {
-      const res = await fetch(apiUrl("/auth/me"), {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-          Accept: "application/json",
-        },
-      });
-      if (!res.ok) {
-        persistToken(null);
-        setUser(null);
+      try {
+        const res = await fetch(apiUrl("/auth/me"), {
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            Accept: "application/json",
+          },
+        });
+
+        if (res.status === 401 || res.status === 403) {
+          clearSession();
+          return false;
+        }
+
+        if (!res.ok) {
+          console.warn(`[auth] /auth/me failed: HTTP ${res.status}`);
+          return false;
+        }
+
+        const data = await res.json();
+        setUser(data.user);
+        return true;
+      } catch (e) {
+        console.warn("[auth] /auth/me network error", e);
         return false;
       }
-      const data = await res.json();
-      setUser(data.user);
-      return true;
     },
-    [persistToken],
+    [clearSession],
   );
 
   useEffect(() => {
@@ -72,9 +122,8 @@ export function AuthProvider({ children }) {
   }, [token, loadMe]);
 
   const logout = useCallback(() => {
-    persistToken(null);
-    setUser(null);
-  }, [persistToken]);
+    clearSession();
+  }, [clearSession]);
 
   const requestSignup = useCallback(async (email, name) => {
     const res = await fetch(apiUrl("/auth/signup"), {
@@ -120,6 +169,31 @@ export function AuthProvider({ children }) {
     [persistToken],
   );
 
+  const uploadProfilePicture = useCallback(
+    async (file) => {
+      if (!token) {
+        throw new Error("Not signed in");
+      }
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(apiUrl("/auth/profile-picture"), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+        body: fd,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body.error || "Upload failed");
+      }
+      setUser(body.user);
+      return body.user;
+    },
+    [token],
+  );
+
   const value = useMemo(
     () => ({
       ready,
@@ -129,6 +203,7 @@ export function AuthProvider({ children }) {
       requestSignup,
       requestLogin,
       verifyOtp,
+      uploadProfilePicture,
       refreshUser: () => (token ? loadMe(token) : Promise.resolve(false)),
     }),
     [
@@ -139,6 +214,7 @@ export function AuthProvider({ children }) {
       requestSignup,
       requestLogin,
       verifyOtp,
+      uploadProfilePicture,
       loadMe,
     ],
   );

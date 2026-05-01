@@ -1,32 +1,19 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
-const UserAvatar = ({ user, size = 40 }) => {
+const UserAvatar = ({ user, size = 24 }) => {
   const [imgErr, setImgErr] = useState(false);
-  const url =
-    user?.profile_picture && String(user.profile_picture).trim() && !imgErr
-      ? user.profile_picture.trim()
-      : null;
+  const rawUrl = user?.profile_picture && String(user.profile_picture).trim();
+  const url = rawUrl && !imgErr ? rawUrl : null;
+
+  useEffect(() => {
+    setImgErr(false);
+  }, [rawUrl]);
 
   const letterRaw = (user?.name || user?.email || "?").trim();
   const letter =
     letterRaw.length > 0 ? letterRaw.charAt(0).toUpperCase() : "?";
 
-  if (url) {
-    return (
-      <img
-        src={url}
-        alt=""
-        width={size}
-        height={size}
-        style={{
-          borderRadius: "50%",
-          objectFit: "cover",
-          display: "block",
-        }}
-        onError={() => setImgErr(true)}
-      />
-    );
-  }
+  const letterFont = Math.max(10, Math.round(size * 0.42));
 
   return (
     <div
@@ -34,18 +21,40 @@ const UserAvatar = ({ user, size = 40 }) => {
         width: size,
         height: size,
         borderRadius: "50%",
-        backgroundColor: "#F2F2F2",
-        color: "#BFBFBF",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: Math.round(size * 0.42),
-        fontWeight: 600,
-        userSelect: "none",
+        overflow: "hidden",
         flexShrink: 0,
+        backgroundColor: url ? "transparent" : "#BFBFBF",
+        color: "#F2F2F2",
       }}
     >
-      {letter}
+      {url ? (
+        <img
+          src={url}
+          alt=""
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
+          onError={() => setImgErr(true)}
+        />
+      ) : (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: letterFont,
+            fontWeight: 600,
+            userSelect: "none",
+          }}
+        >
+          {letter}
+        </div>
+      )}
     </div>
   );
 };
