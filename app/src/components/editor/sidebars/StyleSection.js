@@ -56,14 +56,13 @@ const StyleSection = ({
           >
             {falModels.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.label} — {m.costCents}¢ / image
+                {m.label}
               </option>
             ))}
           </select>
           {activeFalModel && (
             <div style={helperStyle}>
-              {activeFalModel.costCents} token{activeFalModel.costCents === 1 ? '' : 's'} per generation
-              {activeFalModel.supportsReferences ? ' · supports references' : ' · ignores references'}
+              {activeFalModel.supportsReferences ? 'Supports references' : 'Ignores references'}
             </div>
           )}
         </div>

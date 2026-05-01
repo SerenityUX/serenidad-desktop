@@ -51,11 +51,29 @@ const secondaryBtn = {
   cursor: 'pointer',
 };
 
+const removeBtnStyle = {
+  width: 22,
+  height: 22,
+  borderRadius: 11,
+  border: '0',
+  backgroundColor: 'transparent',
+  color: '#888',
+  cursor: 'pointer',
+  fontSize: 16,
+  lineHeight: '20px',
+  padding: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
 const ShareModal = ({ projectId, authToken, onClose }) => {
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState(null);
   const [shares, setShares] = useState([]);
+  const [isOwner, setIsOwner] = useState(false);
+  const [removingId, setRemovingId] = useState(null);
 
   const loadShares = useCallback(async () => {
     if (!projectId || !authToken) return;
@@ -70,7 +88,10 @@ const ShareModal = ({ projectId, authToken, onClose }) => {
         },
       );
       const data = await res.json().catch(() => ({}));
-      if (res.ok) setShares(data.shares || []);
+      if (res.ok) {
+        setShares(data.shares || []);
+        setIsOwner(data.membership === 'owner');
+      }
     } catch (e) {
       console.error(e);
     }
@@ -103,12 +124,14 @@ const ShareModal = ({ projectId, authToken, onClose }) => {
       if (!res.ok) {
         setMessage({ type: 'error', text: body.error || 'Could not share' });
       } else {
-        const text = body.alreadyShared
-          ? `${value} already had access — re-sent the email.`
-          : `Shared with ${value} and sent a notification email.`;
+        const baseText = body.pending
+          ? `Sent ${value} an invite to Serenidad.`
+          : body.alreadyShared
+            ? `${value} already had access — re-sent the email.`
+            : `Shared with ${value} and sent a notification email.`;
         setMessage({
           type: 'success',
-          text: body.emailed === false ? body.warning || text : text,
+          text: body.emailed === false ? body.warning || baseText : baseText,
         });
         setEmail('');
         loadShares();
@@ -121,15 +144,42 @@ const ShareModal = ({ projectId, authToken, onClose }) => {
     }
   };
 
+  const handleRemove = async (userId) => {
+    if (!isOwner || !userId) return;
+    setRemovingId(userId);
+    setMessage(null);
+    try {
+      const res = await fetch(
+        apiUrl(
+          `/projects/${encodeURIComponent(projectId)}/shares/${encodeURIComponent(userId)}`,
+        ),
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            Accept: 'application/json',
+          },
+        },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage({ type: 'error', text: body.error || 'Could not remove' });
+        return;
+      }
+      setShares((prev) => prev.filter((u) => u.id !== userId));
+    } catch (err) {
+      console.error(err);
+      setMessage({ type: 'error', text: err.message || 'Network error' });
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
   return (
     <div style={overlayStyle} onMouseDown={onClose}>
       <div style={cardStyle} onMouseDown={(e) => e.stopPropagation()}>
-        <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 4 }}>
+        <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 14 }}>
           Share project
-        </div>
-        <div style={{ fontSize: 12, color: '#666', marginBottom: 14 }}>
-          Enter the email of someone who already has a Kōdan account. They'll
-          get an email and the project will appear in their list.
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -164,7 +214,7 @@ const ShareModal = ({ projectId, authToken, onClose }) => {
         <div style={{ marginTop: 18, fontSize: 13, fontWeight: 600 }}>
           Shared with
         </div>
-        <div style={{ marginTop: 6, maxHeight: 160, overflowY: 'auto' }}>
+        <div style={{ marginTop: 6, maxHeight: 200, overflowY: 'auto' }}>
           {shares.length === 0 ? (
             <div style={{ fontSize: 12, color: '#888' }}>No collaborators yet.</div>
           ) : (
@@ -188,12 +238,33 @@ const ShareModal = ({ projectId, authToken, onClose }) => {
                     backgroundImage: u.profile_picture ? `url(${u.profile_picture})` : 'none',
                     backgroundSize: 'cover',
                     backgroundPosition: 'center',
+                    flexShrink: 0,
                   }}
                 />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span>{u.name}</span>
-                  <span style={{ fontSize: 11, color: '#666' }}>{u.email}</span>
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {u.pending_signup ? u.email : u.name}
+                    {u.pending_signup ? (
+                      <span style={{ color: '#888', fontSize: 11, marginLeft: 6 }}>
+                        invited
+                      </span>
+                    ) : null}
+                  </span>
+                  {!u.pending_signup ? (
+                    <span style={{ fontSize: 11, color: '#666' }}>{u.email}</span>
+                  ) : null}
                 </div>
+                {isOwner ? (
+                  <button
+                    type="button"
+                    title="Remove"
+                    onClick={() => handleRemove(u.id)}
+                    disabled={removingId === u.id}
+                    style={removeBtnStyle}
+                  >
+                    {removingId === u.id ? '…' : '×'}
+                  </button>
+                ) : null}
               </div>
             ))
           )}

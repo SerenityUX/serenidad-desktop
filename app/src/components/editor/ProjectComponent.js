@@ -8,6 +8,7 @@ import { apiUrl } from '../../config';
 import EditorLayout from './EditorLayout';
 import ComposeLayout from './ComposeLayout';
 import ShareModal from './ShareModal';
+import ProjectLoadingSkeleton from './ProjectLoadingSkeleton';
 
 const REMOTE_CAPTION_DEFAULT = {
   fontSize: 16,
@@ -110,6 +111,9 @@ const ProjectComponent = ({ projectId }) => {
   // References
   const [references, setReferences] = useState([]);
   const [referencesUploading, setReferencesUploading] = useState(false);
+
+  // Image selection (for cmd+c / cmd+v on the generated visual)
+  const [imageSelected, setImageSelected] = useState(false);
 
   // Generation
   const [currentlyLoading, setCurrentlyLoading] = useState([]);
@@ -322,11 +326,206 @@ const ProjectComponent = ({ projectId }) => {
     return () => clearInterval(intervalId);
   }, [selectedScene, isRemote]);
 
-  // ---------- Keyboard scene navigation ----------
+  const copyImageToClipboard = useCallback(async (url) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      }
+    } catch (e) {
+      console.warn('clipboard writeText failed', e);
+    }
+    try {
+      if (window.ClipboardItem && navigator.clipboard?.write) {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const type = blob.type && /^image\//.test(blob.type) ? blob.type : 'image/png';
+        const item = new window.ClipboardItem({ [type]: blob });
+        await navigator.clipboard.write([item]);
+      }
+    } catch (e) {
+      console.warn('clipboard image write skipped:', e?.message || e);
+    }
+  }, []);
+
+  const pasteFromClipboardToReferences = useCallback(async () => {
+    try {
+      if (navigator.clipboard?.read) {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imageType = (item.types || []).find((t) => t.startsWith('image/'));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            const ext = imageType.split('/')[1] || 'png';
+            const file = new File([blob], `pasted-${Date.now()}.${ext}`, { type: imageType });
+            await handleAddReferenceFiles([file]);
+            return;
+          }
+        }
+      }
+    } catch {
+      /* fall through to text */
+    }
+    try {
+      const text = (await navigator.clipboard.readText())?.trim();
+      if (text && /^https?:\/\//i.test(text)) {
+        await handleAddReferenceUrl(text);
+      }
+    } catch (e) {
+      console.warn('clipboard readText failed', e);
+    }
+  }, [handleAddReferenceFiles, handleAddReferenceUrl]);
+
+  const reorderFrames = useCallback(
+    async (newOrderIds) => {
+      if (!authToken || !projectId) return;
+      const res = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/frame-order`),
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ frame_ids: newOrderIds }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Reorder failed');
+      }
+    },
+    [authToken, projectId],
+  );
+
+  const applyReorderLocal = useCallback(
+    (newOrderIds) => {
+      setProjectData((prev) => {
+        if (!prev) return prev;
+        const byId = new Map(prev.scenes.map((s) => [s.frameId, s]));
+        const reordered = newOrderIds
+          .map((id) => byId.get(id))
+          .filter(Boolean);
+        return { ...prev, scenes: reordered };
+      });
+    },
+    [],
+  );
+
+  const handleReorderFrames = useCallback(
+    async (newOrderIds) => {
+      if (!projectData) return;
+      const prevSelectedFrameId =
+        projectData.scenes[selectedScene - 1]?.frameId;
+      applyReorderLocal(newOrderIds);
+      if (prevSelectedFrameId) {
+        const newIdx = newOrderIds.indexOf(prevSelectedFrameId);
+        if (newIdx >= 0) setSelectedScene(newIdx + 1);
+      }
+      try {
+        await reorderFrames(newOrderIds);
+      } catch (e) {
+        console.error(e);
+        window.alert(e.message || 'Could not save new order');
+        await refetchRemoteProject();
+      }
+    },
+    [projectData, selectedScene, applyReorderLocal, reorderFrames, refetchRemoteProject],
+  );
+
+  const duplicateAsEditFrame = useCallback(async () => {
+    if (!isRemote || !authToken || !projectId || !projectData) return;
+    const sourceScene = projectData.scenes[selectedScene - 1];
+    const sourceUrl = sourceScene?.thumbnail;
+    if (!sourceUrl) {
+      window.alert('No image on this frame to duplicate yet — generate one first.');
+      return;
+    }
+    try {
+      const addRes = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/frames`),
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            Accept: 'application/json',
+          },
+        },
+      );
+      const addBody = await addRes.json().catch(() => ({}));
+      if (!addRes.ok) throw new Error(addBody.error || 'Add frame failed');
+      const newFrameId = addBody.frame?.id;
+      if (!newFrameId) throw new Error('Server did not return a frame id');
+
+      await patchFrame(newFrameId, {
+        model: 'fal-ai/nano-banana/edit',
+        reference_urls: [sourceUrl],
+      });
+
+      // Insert the new frame right after the source frame in the order.
+      const currentIds = projectData.scenes.map((s) => s.frameId);
+      const sourceIdx = currentIds.indexOf(sourceScene.frameId);
+      const newOrder = currentIds.slice();
+      if (sourceIdx >= 0) {
+        newOrder.splice(sourceIdx + 1, 0, newFrameId);
+      } else {
+        newOrder.push(newFrameId);
+      }
+      try {
+        await reorderFrames(newOrder);
+      } catch (e) {
+        console.error('Reorder after duplicate failed:', e);
+      }
+
+      const pd = await refetchRemoteProject();
+      if (pd) {
+        const newIdx = pd.scenes.findIndex((s) => s.frameId === newFrameId);
+        if (newIdx >= 0) {
+          setVoiceText('');
+          setPrompt('');
+          setSelectedScene(newIdx + 1);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      window.alert(e.message || 'Could not duplicate frame');
+    }
+  }, [isRemote, authToken, projectId, projectData, selectedScene, patchFrame, refetchRemoteProject, reorderFrames]);
+
+  // ---------- Keyboard: scene navigation + image clipboard ops ----------
   useEffect(() => {
     const handleKeyDown = (event) => {
       const activeElement = document.activeElement;
-      const isInputFocused = activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA';
+      const isInputFocused =
+        activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA';
+      const mod = event.metaKey || event.ctrlKey;
+
+      if (event.key === 'Escape' && imageSelected) {
+        setImageSelected(false);
+        return;
+      }
+
+      if (mod && !isInputFocused && (event.key === 'c' || event.key === 'C')) {
+        const scene = projectData?.scenes?.[selectedScene - 1];
+        if (imageSelected && scene?.thumbnail) {
+          event.preventDefault();
+          copyImageToClipboard(scene.thumbnail);
+        }
+        return;
+      }
+
+      if (mod && !isInputFocused && (event.key === 'v' || event.key === 'V')) {
+        event.preventDefault();
+        pasteFromClipboardToReferences();
+        return;
+      }
+
+      if (mod && !isInputFocused && (event.key === 'd' || event.key === 'D')) {
+        event.preventDefault();
+        duplicateAsEditFrame();
+        return;
+      }
+
       if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && !isInputFocused) {
         setVoiceText('');
         setPressedScene(selectedScene);
@@ -342,7 +541,27 @@ const ProjectComponent = ({ projectId }) => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [projectData, selectedScene]);
+  }, [
+    projectData,
+    selectedScene,
+    imageSelected,
+    copyImageToClipboard,
+    pasteFromClipboardToReferences,
+    duplicateAsEditFrame,
+  ]);
+
+  // Click anywhere outside the selected image clears the selection.
+  useEffect(() => {
+    if (!imageSelected) return undefined;
+    const handleDocClick = () => setImageSelected(false);
+    window.addEventListener('mousedown', handleDocClick);
+    return () => window.removeEventListener('mousedown', handleDocClick);
+  }, [imageSelected]);
+
+  // Selecting a different scene drops any prior image selection.
+  useEffect(() => {
+    setImageSelected(false);
+  }, [selectedScene]);
 
   // ---------- Remote frames: show image/video URL from SQL `frames.result` ----------
   useEffect(() => {
@@ -1090,9 +1309,7 @@ const ProjectComponent = ({ projectId }) => {
       );
     }
     if (!projectData) {
-      return (
-        <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>Loading project…</div>
-      );
+      return <ProjectLoadingSkeleton />;
     }
   }
 
@@ -1168,6 +1385,13 @@ const ProjectComponent = ({ projectId }) => {
             currentlyLoading.includes(selectedScene) ||
             (!isRemote && baseModels.length === 0 && loraModules.length === 0),
           onGenerate: () => startGenerationForScene(selectedScene),
+          references,
+          onAddReferenceFiles: handleAddReferenceFiles,
+          onAddReferenceUrl: handleAddReferenceUrl,
+          onRemoveReference: handleRemoveReference,
+          referencesUploading,
+          selected: imageSelected,
+          onSelectImage: () => setImageSelected(true),
         },
         voiceLineProps: {
           voiceText,
@@ -1232,6 +1456,7 @@ const ProjectComponent = ({ projectId }) => {
         },
         onDeleteScene: handleDeleteScene,
         onOpenFolder: handleOpenFolder,
+        onReorderFrames: handleReorderFrames,
         pressedAddScene,
         onAddSceneMouseDown: () => setPressedAddScene(true),
         onAddSceneMouseUp: () => {

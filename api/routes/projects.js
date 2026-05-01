@@ -9,7 +9,10 @@ const {
   resolveModelOrDefault,
 } = require("../lib/falModels");
 const { putProfileImage } = require("../lib/s3Upload");
-const { sendProjectShareEmail } = require("../lib/email");
+const {
+  sendProjectShareEmail,
+  sendProjectInviteSignupEmail,
+} = require("../lib/email");
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -170,6 +173,49 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       return res.status(500).json({ error: "Could not create project" });
     } finally {
       client.release();
+    }
+  });
+
+  router.patch("/:projectId/frame-order", async (req, res) => {
+    const { projectId } = req.params;
+    if (!isUuid(projectId)) {
+      return res.status(400).json({ error: "Invalid project id" });
+    }
+    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    if (!proj) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const incoming = Array.isArray(req.body?.frame_ids) ? req.body.frame_ids : null;
+    if (!incoming || !incoming.every(isUuid)) {
+      return res
+        .status(400)
+        .json({ error: "frame_ids must be an array of frame uuids" });
+    }
+    if (new Set(incoming).size !== incoming.length) {
+      return res.status(400).json({ error: "frame_ids contains duplicates" });
+    }
+    try {
+      const cur = await pool.query(
+        `SELECT id FROM frames WHERE project_id = $1`,
+        [projectId],
+      );
+      const have = new Set(cur.rows.map((r) => r.id));
+      if (
+        incoming.length !== have.size ||
+        !incoming.every((id) => have.has(id))
+      ) {
+        return res
+          .status(400)
+          .json({ error: "frame_ids must match the project's frames exactly" });
+      }
+      await pool.query(
+        `UPDATE projects SET frame_ids = $1::uuid[] WHERE id = $2`,
+        [incoming, projectId],
+      );
+      return res.json({ frame_ids: incoming });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Could not reorder frames" });
     }
   });
 
@@ -651,17 +697,50 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     }
     try {
       const r = await pool.query(
-        `SELECT u.id, u.name, u.email, u.profile_picture
+        `SELECT u.id, u.name, u.email, u.profile_picture, u.pending_signup
          FROM invites i
          JOIN users u ON u.id = i.sent_to
          WHERE i.project_id = $1
          ORDER BY u.email`,
         [projectId],
       );
-      return res.json({ shares: r.rows });
+      return res.json({
+        shares: r.rows,
+        membership: proj.membership,
+        ownerId: proj.owner_id,
+      });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ error: "Could not load shares" });
+    }
+  });
+
+  router.delete("/:projectId/shares/:userId", async (req, res) => {
+    const { projectId, userId } = req.params;
+    if (!isUuid(projectId) || !isUuid(userId)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    if (!proj) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    if (proj.owner_id !== req.user.id) {
+      return res
+        .status(403)
+        .json({ error: "Only the owner can remove collaborators" });
+    }
+    try {
+      const del = await pool.query(
+        `DELETE FROM invites WHERE project_id = $1 AND sent_to = $2 RETURNING id`,
+        [projectId, userId],
+      );
+      if (del.rows.length === 0) {
+        return res.status(404).json({ error: "Collaborator not found" });
+      }
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Could not remove collaborator" });
     }
   });
 
@@ -681,16 +760,25 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     }
 
     try {
-      const recipient = await pool.query(
-        `SELECT id, name, email FROM users WHERE email = $1`,
+      let recipientRow;
+      let isNewSignup = false;
+      const found = await pool.query(
+        `SELECT id, name, email, pending_signup FROM users WHERE email = $1`,
         [email],
       );
-      if (recipient.rows.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "No Kōdan account found for that email" });
+      if (found.rows.length > 0) {
+        recipientRow = found.rows[0];
+      } else {
+        const placeholderName = email.split("@")[0] || email;
+        const ins = await pool.query(
+          `INSERT INTO users (name, email, pending_signup)
+           VALUES ($1, $2, TRUE)
+           RETURNING id, name, email, pending_signup`,
+          [placeholderName, email],
+        );
+        recipientRow = ins.rows[0];
+        isNewSignup = true;
       }
-      const recipientRow = recipient.rows[0];
 
       if (recipientRow.id === proj.owner_id) {
         return res
@@ -717,24 +805,40 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
         );
       }
 
+      const isPending = isNewSignup || recipientRow.pending_signup === true;
+
       try {
-        await sendProjectShareEmail({
-          to: recipientRow.email,
-          projectName: proj.name,
-          sharerName: req.user.name,
-          sharerEmail: req.user.email,
-        });
+        if (isPending) {
+          await sendProjectInviteSignupEmail({
+            to: recipientRow.email,
+            sharerName: req.user.name,
+            sharerEmail: req.user.email,
+          });
+        } else {
+          await sendProjectShareEmail({
+            to: recipientRow.email,
+            projectName: proj.name,
+            sharerName: req.user.name,
+            sharerEmail: req.user.email,
+          });
+        }
       } catch (mailErr) {
         console.error("Resend:", mailErr.message);
         return res.status(200).json({
           ok: true,
           alreadyShared,
+          pending: isPending,
           emailed: false,
           warning: "Shared, but notification email could not be sent",
         });
       }
 
-      return res.json({ ok: true, alreadyShared, emailed: true });
+      return res.json({
+        ok: true,
+        alreadyShared,
+        pending: isPending,
+        emailed: true,
+      });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ error: "Could not share project" });

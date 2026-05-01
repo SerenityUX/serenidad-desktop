@@ -75,7 +75,7 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false }) =
           Export
         </button>
       )}
-      {user ? <ProfileAvatarMenu user={user} size={24} /> : null}
+      {user ? <ProfileAvatarMenu user={user} size={24} align="right" /> : null}
     </div>
   </div>
   );

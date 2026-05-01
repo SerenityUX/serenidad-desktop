@@ -12,6 +12,17 @@ const mediaStyle = (aspectRatio) => ({
   display: 'flex',
 });
 
+const selectionWrapStyle = (selected) => ({
+  display: 'inline-flex',
+  borderRadius: 18,
+  padding: 2,
+  outline: selected ? '3px solid #007AFF' : '3px solid transparent',
+  outlineOffset: 0,
+  boxShadow: selected ? '0 0 0 1px #fff inset' : 'none',
+  transition: 'outline-color 80ms linear',
+  cursor: 'pointer',
+});
+
 const ScenePreview = ({
   thumbnail,
   videoKey,
@@ -23,6 +34,13 @@ const ScenePreview = ({
   onPromptChange,
   generateDisabled,
   onGenerate,
+  references,
+  onAddReferenceFiles,
+  onAddReferenceUrl,
+  onRemoveReference,
+  referencesUploading,
+  selected,
+  onSelectImage,
 }) => {
   const mediaSrc =
     thumbnail != null && String(thumbnail).trim() !== ''
@@ -30,31 +48,41 @@ const ScenePreview = ({
       : '';
 
   if (mediaSrc) {
+    const handleClick = (e) => {
+      e.stopPropagation();
+      onSelectImage?.(true);
+    };
     if (mediaSrc.endsWith('.mp4')) {
-      return <video key={videoKey} src={mediaSrc} controls style={mediaStyle(aspectRatio)} />;
+      return (
+        <div style={selectionWrapStyle(selected)} onClick={handleClick}>
+          <video key={videoKey} src={mediaSrc} controls style={mediaStyle(aspectRatio)} />
+        </div>
+      );
     }
     return (
-      <Img
-        src={mediaSrc}
-        alt=""
-        loader={
-          <div
-            style={{
-              ...mediaStyle(aspectRatio),
-              backgroundColor: '#F2F2F2',
-            }}
-          />
-        }
-        unloader={
-          <div
-            style={{
-              ...mediaStyle(aspectRatio),
-              backgroundColor: '#F2F2F2',
-            }}
-          />
-        }
-        style={{ ...mediaStyle(aspectRatio), objectFit: 'cover', backgroundColor: '#F2F2F2' }}
-      />
+      <div style={selectionWrapStyle(selected)} onClick={handleClick}>
+        <Img
+          src={mediaSrc}
+          alt=""
+          loader={
+            <div
+              style={{
+                ...mediaStyle(aspectRatio),
+                backgroundColor: '#F2F2F2',
+              }}
+            />
+          }
+          unloader={
+            <div
+              style={{
+                ...mediaStyle(aspectRatio),
+                backgroundColor: '#F2F2F2',
+              }}
+            />
+          }
+          style={{ ...mediaStyle(aspectRatio), objectFit: 'cover', backgroundColor: '#F2F2F2' }}
+        />
+      </div>
     );
   }
 
@@ -68,6 +96,11 @@ const ScenePreview = ({
       isLoading={isLoading}
       progress={progress}
       fact={fact}
+      references={references}
+      onAddReferenceFiles={onAddReferenceFiles}
+      onAddReferenceUrl={onAddReferenceUrl}
+      onRemoveReference={onRemoveReference}
+      referencesUploading={referencesUploading}
     />
   );
 };

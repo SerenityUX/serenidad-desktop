@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import ProjectComponent from './components/editor/ProjectComponent';
+import { AuthProvider } from './context/AuthContext';
 
 const urlParams = new URLSearchParams(window.location.search);
 const projectIdRaw = urlParams.get('projectId');
@@ -16,5 +17,9 @@ if (!projectId) {
     </div>,
   );
 } else {
-  root.render(<ProjectComponent projectId={projectId} />);
+  root.render(
+    <AuthProvider>
+      <ProjectComponent projectId={projectId} />
+    </AuthProvider>,
+  );
 }

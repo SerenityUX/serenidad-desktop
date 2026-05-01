@@ -24,11 +24,11 @@ const PromptSection = ({ prompt, onPromptChange, isTransitioning }) => (
     <SectionHeader icon="icons/Prompt.svg" label="Prompt" />
 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
-      <FieldLabel>POSITIVE PROMPT</FieldLabel>
+      <FieldLabel>PROMPT</FieldLabel>
       <textarea
         value={prompt}
         onChange={onPromptChange}
-        placeholder="Positive Prompt..."
+        placeholder="Prompt..."
         style={textareaStyle(isTransitioning)}
       />
     </div>

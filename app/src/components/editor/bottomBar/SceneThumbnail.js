@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Img } from 'react-image';
 
 const SceneThumbnail = ({
@@ -10,20 +10,34 @@ const SceneThumbnail = ({
   isMouseDown,
   isDeleting,
   isHidden,
+  isDragging,
   aspectRatio,
   thumbnailTimestamp,
   showActionIcons,
   canExportClip,
+  draggable,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
   onMouseDown,
   onMouseUp,
   onMouseLeave,
   onDelete,
   onOpenFolder,
 }) => {
+  const localRef = useRef(null);
+  const setRefs = (el) => {
+    localRef.current = el;
+    if (typeof innerRef === 'function') innerRef(el);
+  };
   const pressed = (isPressed && isMouseDown) || (isSelected && isPressed);
   return (
     <div
-      ref={innerRef}
+      ref={setRefs}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={(e) => onDragOver?.(e, localRef.current)}
+      onDragEnd={onDragEnd}
       style={{
         display: isHidden ? 'none' : 'flex',
         width: isDeleting ? '0px' : 'fit-content',
@@ -34,8 +48,8 @@ const SceneThumbnail = ({
         paddingRight: '0px',
         marginRight: '0px',
         position: 'relative',
-        cursor: 'pointer',
-        opacity: isDeleting ? 0 : (isSelected ? 1 : 0.3),
+        cursor: isDragging ? 'grabbing' : 'pointer',
+        opacity: isDeleting ? 0 : isDragging ? 0.4 : (isSelected ? 1 : 0.3),
         transform: `scale(${pressed ? 0.9 : 1})`,
         transition:
           'opacity 0.25s ease-out, transform 0.1s ease-out, width 0.3s ease-out, height 0.3s ease-out, margin 0.3s ease-out, padding 0.3s ease-out',
@@ -46,37 +60,65 @@ const SceneThumbnail = ({
     >
       {showActionIcons && (
         <>
-          <Img
+          <button
+            type="button"
+            aria-label="Delete scene"
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseUp={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
             style={{
-              width: 18,
-              height: 18,
               position: 'absolute',
-              top: 32,
-              right: 12,
+              top: 21,
+              right: 1,
+              padding: 11,
+              border: 0,
+              background: 'transparent',
+              cursor: 'pointer',
               opacity: isSelected ? 1 : 0,
+              pointerEvents: isSelected ? 'auto' : 'none',
               transform: `scale(${isSelected ? 1 : 0})`,
               transition: 'opacity 0.25s ease-out, transform 0.25s ease-out',
               zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
-            src="./icons/Minus.svg"
-          />
-          {canExportClip && (
+          >
             <Img
+              src="./icons/Minus.svg"
+              style={{ width: 18, height: 18, pointerEvents: 'none' }}
+            />
+          </button>
+          {canExportClip && (
+            <button
+              type="button"
+              aria-label="Open scene folder"
+              onMouseDown={(e) => e.stopPropagation()}
+              onMouseUp={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); onOpenFolder(); }}
               style={{
-                width: 18,
-                height: 18,
                 position: 'absolute',
-                top: 32,
-                right: 36,
+                top: 21,
+                right: 25,
+                padding: 11,
+                border: 0,
+                background: 'transparent',
+                cursor: 'pointer',
                 opacity: isSelected ? 1 : 0,
+                pointerEvents: isSelected ? 'auto' : 'none',
                 transform: `scale(${isSelected ? 1 : 0})`,
                 transition: 'opacity 0.25s ease-out, transform 0.25s ease-out',
                 zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
-              src="./icons/Folder.svg"
-            />
+            >
+              <Img
+                src="./icons/Folder.svg"
+                style={{ width: 18, height: 18, pointerEvents: 'none' }}
+              />
+            </button>
           )}
         </>
       )}
@@ -112,6 +154,7 @@ const SceneThumbnail = ({
             transition: 'opacity 0.1s ease-out, width 0.3s ease-out, transform 0.1s ease-out',
             opacity: pressed ? 0.7 : 1,
             transform: `scale(${pressed ? 0.95 : 1})`,
+            pointerEvents: 'none',
           }}
         />
       ) : (

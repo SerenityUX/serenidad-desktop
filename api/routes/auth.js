@@ -53,34 +53,53 @@ module.exports = function createAuthRouter(pool, requireAuth) {
 
     try {
       const existing = await pool.query(
-        `SELECT id FROM users WHERE email = $1`,
+        `SELECT id, pending_signup FROM users WHERE email = $1`,
         [email],
       );
-      if (existing.rows.length > 0) {
-        return res.status(409).json({ error: "Email already registered" });
-      }
 
       let ins;
-      try {
-        ins = await pool.query(
-          `INSERT INTO users (name, email, otp, otp_expires_at)
-           VALUES ($1, $2, $3, $4)
-           RETURNING id`,
-          [name, email, otpHash, expires],
-        );
-      } catch (insertErr) {
-        if (insertErr.code === "23505") {
+      let upgradedExisting = false;
+      if (existing.rows.length > 0) {
+        if (!existing.rows[0].pending_signup) {
           return res.status(409).json({ error: "Email already registered" });
         }
-        throw insertErr;
+        ins = await pool.query(
+          `UPDATE users
+           SET name = $2, otp = $3, otp_expires_at = $4
+           WHERE id = $1
+           RETURNING id`,
+          [existing.rows[0].id, name, otpHash, expires],
+        );
+        upgradedExisting = true;
+      } else {
+        try {
+          ins = await pool.query(
+            `INSERT INTO users (name, email, otp, otp_expires_at)
+             VALUES ($1, $2, $3, $4)
+             RETURNING id`,
+            [name, email, otpHash, expires],
+          );
+        } catch (insertErr) {
+          if (insertErr.code === "23505") {
+            return res.status(409).json({ error: "Email already registered" });
+          }
+          throw insertErr;
+        }
       }
 
       try {
         await sendOtpEmail(email, otp);
       } catch (e) {
-        await pool.query(`DELETE FROM users WHERE id = $1`, [
-          ins.rows[0].id,
-        ]);
+        if (!upgradedExisting) {
+          await pool.query(`DELETE FROM users WHERE id = $1`, [
+            ins.rows[0].id,
+          ]);
+        } else {
+          await pool.query(
+            `UPDATE users SET otp = NULL, otp_expires_at = NULL WHERE id = $1`,
+            [ins.rows[0].id],
+          );
+        }
         console.error("Resend:", e.message);
         return res.status(502).json({ error: "Could not send email" });
       }
@@ -181,7 +200,9 @@ module.exports = function createAuthRouter(pool, requireAuth) {
 
       const token = generateSessionToken();
       await pool.query(
-        `UPDATE users SET token = $2, otp = NULL, otp_expires_at = NULL WHERE id = $1`,
+        `UPDATE users
+         SET token = $2, otp = NULL, otp_expires_at = NULL, pending_signup = FALSE
+         WHERE id = $1`,
         [row.id, token],
       );
 

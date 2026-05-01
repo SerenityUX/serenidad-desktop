@@ -2,35 +2,36 @@ import React, { useRef, useState } from 'react';
 import SectionHeader from '../shared/SectionHeader';
 import FieldLabel from '../shared/FieldLabel';
 
-const dropZoneStyle = (active, disabled) => ({
+const THUMB = 48;
+const MIN_HEIGHT = 64;
+
+const dropZoneStyle = (active, disabled, hasItems) => ({
   width: 'calc(100% - 32px)',
   marginLeft: 12,
   marginRight: 12,
-  border: `1px dashed ${active ? '#404040' : '#D9D9D9'}`,
-  borderRadius: '4px',
+  boxSizing: 'border-box',
+  border: `1px ${hasItems ? 'solid' : 'dashed'} ${active ? '#404040' : '#D9D9D9'}`,
+  borderRadius: 4,
   backgroundColor: active ? '#F5F5F5' : '#fff',
-  fontSize: '12px',
+  fontSize: 14,
   color: '#808080',
-  padding: '12px 8px',
+  padding: hasItems ? 6 : '4px 4px',
+  minHeight: MIN_HEIGHT,
+  display: 'flex',
+  alignItems: hasItems ? 'flex-start' : 'center',
+  justifyContent: hasItems ? 'flex-start' : 'center',
+  flexWrap: 'wrap',
+  gap: 6,
   textAlign: 'center',
   cursor: disabled ? 'not-allowed' : 'pointer',
   opacity: disabled ? 0.6 : 1,
 });
 
-const thumbRowStyle = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: 6,
-  width: 'calc(100% - 32px)',
-  marginLeft: 12,
-  marginRight: 12,
-  marginTop: 6,
-};
-
 const thumbStyle = {
   position: 'relative',
-  width: 56,
-  height: 56,
+  width: THUMB,
+  height: THUMB,
+  flex: '0 0 auto',
   borderRadius: 4,
   overflow: 'hidden',
   border: '1px solid #D9D9D9',
@@ -39,8 +40,8 @@ const thumbStyle = {
 
 const removeBtnStyle = {
   position: 'absolute',
-  top: 2,
-  right: 2,
+  top: 1,
+  right: 1,
   width: 16,
   height: 16,
   borderRadius: '50%',
@@ -53,16 +54,34 @@ const removeBtnStyle = {
   cursor: 'pointer',
 };
 
+const addMoreStyle = {
+  flex: '0 0 auto',
+  width: THUMB,
+  height: THUMB,
+  borderRadius: 4,
+  border: '1px dashed #D9D9D9',
+  background: '#fff',
+  color: '#808080',
+  fontSize: 20,
+  lineHeight: 1,
+  padding: 0,
+  cursor: 'pointer',
+};
+
 const ReferencesSection = ({
   references = [],
   onAddFiles,
   onAddUrl,
   onRemove,
   uploading,
-  modelSupportsReferences,
 }) => {
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef(null);
+
+  const openPicker = () => {
+    if (uploading) return;
+    inputRef.current?.click();
+  };
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -88,6 +107,8 @@ const ReferencesSection = ({
     e.target.value = '';
   };
 
+  const hasItems = references.length > 0;
+
   return (
     <>
       <SectionHeader icon="icons/Picture.svg" label="References" />
@@ -95,7 +116,7 @@ const ReferencesSection = ({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
         <FieldLabel>REFERENCE IMAGES</FieldLabel>
         <div
-          style={dropZoneStyle(dragActive, uploading)}
+          style={dropZoneStyle(dragActive, uploading, hasItems)}
           onDragOver={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -107,13 +128,47 @@ const ReferencesSection = ({
             setDragActive(false);
           }}
           onDrop={handleDrop}
-          onClick={() => !uploading && inputRef.current?.click()}
+          onClick={hasItems ? undefined : openPicker}
         >
-          {uploading
-            ? 'Uploading…'
-            : modelSupportsReferences === false
-              ? 'Drop images or click to upload (current model ignores refs)'
-              : 'Drop images or click to upload'}
+          {uploading && !hasItems ? (
+            'Uploading…'
+          ) : !hasItems ? (
+            'Drop images or upload'
+          ) : (
+            <>
+              {references.map((url) => (
+                <div key={url} style={thumbStyle}>
+                  <img
+                    src={url}
+                    alt=""
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                  <button
+                    type="button"
+                    style={removeBtnStyle}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemove?.(url);
+                    }}
+                    title="Remove reference"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                style={addMoreStyle}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openPicker();
+                }}
+                title="Add reference"
+              >
+                +
+              </button>
+            </>
+          )}
           <input
             ref={inputRef}
             type="file"
@@ -123,31 +178,6 @@ const ReferencesSection = ({
             onChange={handlePick}
           />
         </div>
-
-        {references.length > 0 && (
-          <div style={thumbRowStyle}>
-            {references.map((url) => (
-              <div key={url} style={thumbStyle}>
-                <img
-                  src={url}
-                  alt=""
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-                <button
-                  type="button"
-                  style={removeBtnStyle}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRemove?.(url);
-                  }}
-                  title="Remove reference"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </>
   );

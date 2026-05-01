@@ -13,7 +13,7 @@ const menuBtn = {
   fontSize: 14,
 };
 
-const ProfileAvatarMenu = ({ user, size = 24, onPickWorkspaceFolder }) => {
+const ProfileAvatarMenu = ({ user, size = 24, onPickWorkspaceFolder, align = 'left' }) => {
   const { logout, uploadProfilePicture } = useAuth();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -75,7 +75,7 @@ const ProfileAvatarMenu = ({ user, size = 24, onPickWorkspaceFolder }) => {
           style={{
             position: "absolute",
             top: "100%",
-            right: 0,
+            ...(align === 'right' ? { right: 0 } : { left: 0 }),
             marginTop: 6,
             minWidth: 200,
             background: "#fff",

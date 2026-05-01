@@ -13,7 +13,7 @@ const FAL_IMAGE_MODELS = [
   },
   {
     id: "fal-ai/nano-banana/edit",
-    label: "Nano Banana (Edit)",
+    label: "Nano Banana Edit",
     costCents: 4,
     supportsReferences: true,
     family: "nano-banana",
@@ -78,7 +78,20 @@ const FAL_IMAGE_MODELS = [
 
 const DEFAULT_MODEL_ID = "fal-ai/nano-banana-2";
 
-const MODEL_BY_ID = new Map(FAL_IMAGE_MODELS.map((m) => [m.id, m]));
+/* Hidden aliases keep frames stored against retired ids resolvable without exposing them in the picker. */
+const HIDDEN_ALIASES = [
+  {
+    id: "fal-ai/nano-banana/edit",
+    label: "Nano Banana (Edit)",
+    costCents: 4,
+    supportsReferences: true,
+    family: "nano-banana",
+  },
+];
+
+const MODEL_BY_ID = new Map(
+  [...FAL_IMAGE_MODELS, ...HIDDEN_ALIASES].map((m) => [m.id, m]),
+);
 
 function getModel(id) {
   return MODEL_BY_ID.get(String(id || "")) || null;

@@ -47,4 +47,23 @@ async function sendProjectShareEmail({ to, projectName, sharerName, sharerEmail 
   }
 }
 
-module.exports = { sendOtpEmail, sendProjectShareEmail };
+async function sendProjectInviteSignupEmail({ to, sharerName, sharerEmail }) {
+  const { resend, from } = getResend();
+  const who = escapeHtml(sharerName || sharerEmail || "Someone");
+  const whoPlain = sharerName || sharerEmail || "Someone";
+  const { error } = await resend.emails.send({
+    from,
+    to: [to],
+    subject: `${whoPlain} sent you an invite to Serenidad`,
+    html: `<p>${who} sent you an invite to Serenidad. Go create an account and you can begin telling the story with ${who}.</p><p><a href="https://serenidad.app">https://serenidad.app</a></p>`,
+  });
+  if (error) {
+    throw new Error(error.message || "Resend send failed");
+  }
+}
+
+module.exports = {
+  sendOtpEmail,
+  sendProjectShareEmail,
+  sendProjectInviteSignupEmail,
+};
