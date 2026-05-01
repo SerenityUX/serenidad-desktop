@@ -46,9 +46,9 @@ const MainApp = () => {
       async (payload) => {
         const { projectName, width, height } = payload || {};
         const w =
-          Number.parseInt(String(width).replace(/\D/g, ""), 10) || 1920;
+          Number.parseInt(String(width).replace(/\D/g, ""), 10) || 1280;
         const h =
-          Number.parseInt(String(height).replace(/\D/g, ""), 10) || 1080;
+          Number.parseInt(String(height).replace(/\D/g, ""), 10) || 720;
         try {
           const res = await fetch(apiUrl("/projects"), {
             method: "POST",

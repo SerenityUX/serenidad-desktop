@@ -1,5 +1,8 @@
 const express = require("express");
 const { isProbablyAssetUrl } = require("../lib/assetUrl");
+const { generateNanoBananaImage } = require("../lib/falNanoBanana");
+
+const IMAGE_GEN_TOKEN_COST = 8;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -85,10 +88,10 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     let width = Number.parseInt(String(req.body?.width ?? ""), 10);
     let height = Number.parseInt(String(req.body?.height ?? ""), 10);
     if (!Number.isFinite(width) || width < 1) {
-      width = 1920;
+      width = 1280;
     }
     if (!Number.isFinite(height) || height < 1) {
-      height = 1080;
+      height = 720;
     }
 
     const client = await pool.connect();
@@ -187,6 +190,158 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     } catch (e) {
       console.error(e);
       return res.status(500).json({ error: "Could not update frame" });
+    }
+  });
+
+  router.post("/:projectId/frames/:frameId/generate-image", async (req, res) => {
+    const { projectId, frameId } = req.params;
+    if (!isUuid(projectId) || !isUuid(frameId)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    if (!proj) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const prompt = String(req.body?.prompt || "").trim();
+    if (!prompt) {
+      return res.status(400).json({ error: "prompt is required" });
+    }
+
+    const frameCheck = await pool.query(
+      `SELECT id FROM frames WHERE id = $1 AND project_id = $2`,
+      [frameId, projectId],
+    );
+    if (frameCheck.rows.length === 0) {
+      return res.status(404).json({ error: "Frame not found" });
+    }
+
+    const debitClient = await pool.connect();
+    try {
+      await debitClient.query("BEGIN");
+      const bal = await debitClient.query(
+        `SELECT tokens FROM users WHERE id = $1 FOR UPDATE`,
+        [req.user.id],
+      );
+      const current = bal.rows[0]?.tokens ?? 0;
+      if (current < IMAGE_GEN_TOKEN_COST) {
+        await debitClient.query("ROLLBACK");
+        return res.status(402).json({
+          error: "Insufficient tokens",
+          tokens: current,
+          required: IMAGE_GEN_TOKEN_COST,
+        });
+      }
+      await debitClient.query(
+        `INSERT INTO transactions (user_id, delta, name, notes)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          req.user.id,
+          -IMAGE_GEN_TOKEN_COST,
+          "Image generation",
+          `nano-banana-2 frame ${frameId}`,
+        ],
+      );
+      await debitClient.query("COMMIT");
+    } catch (e) {
+      await debitClient.query("ROLLBACK").catch(() => {});
+      debitClient.release();
+      console.error(e);
+      return res.status(500).json({ error: "Could not debit tokens" });
+    }
+    debitClient.release();
+
+    let imageUrl;
+    try {
+      imageUrl = await generateNanoBananaImage({
+        prompt,
+        width: proj.width,
+        height: proj.height,
+      });
+    } catch (falErr) {
+      console.error(falErr);
+      try {
+        await pool.query(
+          `INSERT INTO transactions (user_id, delta, name, notes)
+           VALUES ($1, $2, $3, $4)`,
+          [
+            req.user.id,
+            IMAGE_GEN_TOKEN_COST,
+            "Refund",
+            String(falErr.message || "fal generation failed").slice(0, 500),
+          ],
+        );
+      } catch (refundErr) {
+        console.error(refundErr);
+      }
+      return res.status(502).json({
+        error: String(falErr.message || "Image generation failed"),
+      });
+    }
+
+    if (!isProbablyAssetUrl(imageUrl)) {
+      try {
+        await pool.query(
+          `INSERT INTO transactions (user_id, delta, name, notes)
+           VALUES ($1, $2, $3, $4)`,
+          [
+            req.user.id,
+            IMAGE_GEN_TOKEN_COST,
+            "Refund",
+            "Invalid image URL from provider",
+          ],
+        );
+      } catch (refundErr) {
+        console.error(refundErr);
+      }
+      return res.status(502).json({ error: "Invalid image URL from provider" });
+    }
+
+    try {
+      const upd = await pool.query(
+        `UPDATE frames
+         SET prompt = $1, result = $2
+         WHERE id = $3 AND project_id = $4
+         RETURNING id, prompt, negative_prompt, result, meta, created_at`,
+        [prompt, imageUrl, frameId, projectId],
+      );
+      if (upd.rows.length === 0) {
+        await pool.query(
+          `INSERT INTO transactions (user_id, delta, name, notes)
+           VALUES ($1, $2, $3, $4)`,
+          [
+            req.user.id,
+            IMAGE_GEN_TOKEN_COST,
+            "Refund",
+            "Frame row missing after generation",
+          ],
+        );
+        return res.status(404).json({ error: "Frame not found" });
+      }
+      const tokRow = await pool.query(
+        `SELECT tokens FROM users WHERE id = $1`,
+        [req.user.id],
+      );
+      return res.json({
+        frame: upd.rows[0],
+        tokens: tokRow.rows[0]?.tokens ?? 0,
+      });
+    } catch (e) {
+      console.error(e);
+      try {
+        await pool.query(
+          `INSERT INTO transactions (user_id, delta, name, notes)
+           VALUES ($1, $2, $3, $4)`,
+          [
+            req.user.id,
+            IMAGE_GEN_TOKEN_COST,
+            "Refund",
+            String(e.message || "save failed").slice(0, 500),
+          ],
+        );
+      } catch (refundErr) {
+        console.error(refundErr);
+      }
+      return res.status(500).json({ error: "Could not save frame" });
     }
   });
 

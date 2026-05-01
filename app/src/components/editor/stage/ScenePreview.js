@@ -26,13 +26,41 @@ const ScenePreview = ({
   generateDisabled,
   onGenerate,
 }) => {
-  if (thumbnail != null) {
-    if (thumbnail.endsWith('.mp4')) {
-      return <video key={videoKey} src={thumbnail} controls style={mediaStyle(aspectRatio)} />;
+  const mediaSrc =
+    thumbnail != null && String(thumbnail).trim() !== ''
+      ? String(thumbnail).trim()
+      : '';
+
+  if (mediaSrc) {
+    if (mediaSrc.endsWith('.mp4')) {
+      return <video key={videoKey} src={mediaSrc} controls style={mediaStyle(aspectRatio)} />;
     }
-    return <Img src={thumbnail} alt="Thumbnail" style={mediaStyle(aspectRatio)} />;
+    return (
+      <Img
+        src={mediaSrc}
+        alt=""
+        loader={
+          <div
+            style={{
+              ...mediaStyle(aspectRatio),
+              backgroundColor: '#F2F2F2',
+            }}
+          />
+        }
+        unloader={
+          <div
+            style={{
+              ...mediaStyle(aspectRatio),
+              backgroundColor: '#F2F2F2',
+            }}
+          />
+        }
+        style={{ ...mediaStyle(aspectRatio), objectFit: 'cover', backgroundColor: '#F2F2F2' }}
+      />
+    );
   }
 
+  /* No frame asset yet: original compose UI (positive / negative / Generate), plus loading UI when generating. */
   return (
     <ScenePlaceholder
       aspectRatio={aspectRatio}

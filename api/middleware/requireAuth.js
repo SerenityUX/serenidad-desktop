@@ -11,7 +11,7 @@ module.exports = function createRequireAuth(pool) {
 
     try {
       const r = await pool.query(
-        `SELECT id, name, email, profile_picture, created_at
+        `SELECT id, name, email, profile_picture, created_at, tokens
          FROM users WHERE token = $1`,
         [token],
       );

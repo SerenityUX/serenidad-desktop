@@ -219,8 +219,8 @@ const ProjectComponent = ({ projectId }) => {
         }
         const pd = remoteDetailToProjectData(data.project, data.frames || []);
         setProjectData(pd);
-        const pw = data.project.width || 1920;
-        const ph = data.project.height || 1080;
+        const pw = data.project.width || 1280;
+        const ph = data.project.height || 720;
         setImgW(pw);
         setImgH(ph);
         setAspectRatio(pw / ph);
@@ -360,8 +360,71 @@ const ProjectComponent = ({ projectId }) => {
   };
 
   // ---------- Image generation ----------
-  const generateImage = async (_sceneIndex) => {
-    window.alert('Local GPU generation is disabled for cloud-backed projects in this build.');
+  const generateImage = async (sceneIndex) => {
+    if (!isRemote) {
+      window.alert('Local GPU generation is disabled for cloud-backed projects in this build.');
+      return;
+    }
+    const scene = projectData?.scenes?.[sceneIndex - 1];
+    if (!scene?.frameId || !authToken || !projectId) return;
+    const promptText = String(prompt || '').trim();
+    if (!promptText) {
+      window.alert('Enter a prompt first.');
+      setCurrentlyLoading((prev) => prev.filter((s) => s !== sceneIndex));
+      setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generate Visuals' }));
+      return;
+    }
+    try {
+      const res = await fetch(
+        apiUrl(
+          `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(scene.frameId)}/generate-image`,
+        ),
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ prompt: promptText }),
+        },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg =
+          body.error ||
+          (res.status === 402
+            ? `Not enough tokens (need 8; you have ${body.tokens ?? '?'})`
+            : `Generation failed (${res.status})`);
+        throw new Error(msg);
+      }
+      const pd = await refetchRemoteProject();
+      const thumb = body.frame?.result || pd?.scenes?.[sceneIndex - 1]?.thumbnail;
+      if (thumb) loadThumbnail(thumb);
+      setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generated' }));
+      setProjectData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          scenes: prev.scenes.map((s, i) =>
+            i === sceneIndex - 1
+              ? {
+                  ...s,
+                  positivePrompt: promptText,
+                  thumbnail: thumb || s.thumbnail,
+                }
+              : s,
+          ),
+        };
+      });
+      setPrompt(promptText);
+    } catch (err) {
+      console.error(err);
+      window.alert(err.message || 'Generation failed');
+      setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generate Visuals' }));
+    } finally {
+      setCurrentlyLoading((prev) => prev.filter((s) => s !== sceneIndex));
+    }
   };
 
   const addNewScene = () => {
@@ -880,7 +943,9 @@ const ProjectComponent = ({ projectId }) => {
   }
 
   const generateDisabled =
-    prompt === '' || currentlyLoading.includes(selectedScene) || (baseModels.length === 0 && loraModules.length === 0);
+    prompt.trim() === '' ||
+    currentlyLoading.includes(selectedScene) ||
+    (!isRemote && baseModels.length === 0 && loraModules.length === 0);
 
   return (
     <EditorLayout
@@ -916,7 +981,10 @@ const ProjectComponent = ({ projectId }) => {
           negativePrompt,
           onPromptChange: handlePromptChange,
           onNegativePromptChange: handleNegativePromptChange,
-          generateDisabled: prompt === '' || (baseModels.length === 0 && loraModules.length === 0),
+          generateDisabled:
+            prompt.trim() === '' ||
+            currentlyLoading.includes(selectedScene) ||
+            (!isRemote && baseModels.length === 0 && loraModules.length === 0),
           onGenerate: () => startGenerationForScene(selectedScene),
         },
         voiceLineProps: {

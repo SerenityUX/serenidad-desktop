@@ -155,7 +155,7 @@ module.exports = function createAuthRouter(pool, requireAuth) {
 
     try {
       const r = await pool.query(
-        `SELECT id, name, email, profile_picture, otp, otp_expires_at, created_at
+        `SELECT id, name, email, profile_picture, otp, otp_expires_at, created_at, tokens
          FROM users WHERE email = $1`,
         [email],
       );
@@ -193,6 +193,7 @@ module.exports = function createAuthRouter(pool, requireAuth) {
           email: row.email,
           profile_picture: row.profile_picture,
           created_at: row.created_at,
+          tokens: row.tokens ?? 0,
         },
       });
     } catch (e) {
@@ -247,7 +248,7 @@ module.exports = function createAuthRouter(pool, requireAuth) {
         });
         const upd = await pool.query(
           `UPDATE users SET profile_picture = $1 WHERE id = $2
-           RETURNING id, name, email, profile_picture, created_at`,
+           RETURNING id, name, email, profile_picture, created_at, tokens`,
           [url, userId],
         );
         const row = upd.rows[0];
@@ -258,6 +259,7 @@ module.exports = function createAuthRouter(pool, requireAuth) {
             email: row.email,
             profile_picture: row.profile_picture,
             created_at: row.created_at,
+            tokens: row.tokens ?? 0,
           },
         });
       } catch (e) {

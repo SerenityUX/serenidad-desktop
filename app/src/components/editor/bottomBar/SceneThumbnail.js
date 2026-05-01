@@ -80,39 +80,54 @@ const SceneThumbnail = ({
           )}
         </>
       )}
-      <Img
-        src={`${scene.thumbnail}?t=${thumbnailTimestamp || ''}`}
-        loader={
-          <div style={{
+      {scene.thumbnail != null && String(scene.thumbnail).trim() !== '' ? (
+        <Img
+          src={`${String(scene.thumbnail).trim()}?t=${thumbnailTimestamp || ''}`}
+          loader={
+            <div style={{
+              aspectRatio,
+              borderRadius: '12px',
+              maxHeight: '100%',
+              width: '100%',
+              backgroundColor: '#F2F2F2',
+            }} />
+          }
+          unloader={
+            <div style={{
+              aspectRatio,
+              borderRadius: '12px',
+              maxHeight: '100%',
+              transition: 'opacity 0.1s ease-out, width 0.3s ease-out, transform 0.1s ease-out',
+              width: '100%',
+              backgroundColor: '#F2F2F2',
+            }} />
+          }
+          style={{
             aspectRatio,
             borderRadius: '12px',
             maxHeight: '100%',
-            width: '100%',
+            display: 'flex',
             backgroundColor: '#F2F2F2',
-          }} />
-        }
-        unloader={
-          <div style={{
-            aspectRatio,
-            borderRadius: '12px',
-            maxHeight: '100%',
+            objectFit: 'cover',
             transition: 'opacity 0.1s ease-out, width 0.3s ease-out, transform 0.1s ease-out',
+            opacity: pressed ? 0.7 : 1,
+            transform: `scale(${pressed ? 0.95 : 1})`,
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            aspectRatio,
+            borderRadius: '12px',
+            maxHeight: '100%',
             width: '100%',
             backgroundColor: '#F2F2F2',
-          }} />
-        }
-        style={{
-          aspectRatio,
-          borderRadius: '12px',
-          maxHeight: '100%',
-          display: 'flex',
-          backgroundColor: '#fff',
-          objectFit: 'cover',
-          transition: 'opacity 0.1s ease-out, width 0.3s ease-out, transform 0.1s ease-out',
-          opacity: pressed ? 0.7 : 1,
-          transform: `scale(${pressed ? 0.95 : 1})`,
-        }}
-      />
+            transition: 'opacity 0.1s ease-out, width 0.3s ease-out, transform 0.1s ease-out',
+            opacity: pressed ? 0.7 : 1,
+            transform: `scale(${pressed ? 0.95 : 1})`,
+          }}
+        />
+      )}
     </div>
   );
 };
