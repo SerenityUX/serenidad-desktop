@@ -73,23 +73,26 @@
     </div>
   </div>
   <script>
-    document.getElementById('createProjectBtn').addEventListener('click', function() {
+    document.getElementById('createProjectBtn').addEventListener('click', async function() {
       const projectName = document.getElementById('projectName').value;
       const projectFolder = document.getElementById('projectFolder').value;
       const width = document.getElementById('widthInput').value;
       const height = document.getElementById('heightInput').value;
 
-      window.electron.invoke('createProject', {
-        folderPath: localStorage.getItem('kodanFolder'),
+      let folderPath = null;
+      try {
+        folderPath = await window.electron.invoke('get-modal-workspace-folder');
+      } catch (e) {
+        console.error(e);
+      }
+
+      window.electron.send('create-project-from-modal', {
+        folderPath,
         projectName,
         projectFolder,
         width,
         height,
-      }).then(() => {
-        // Close both modal and main window after project creation
-        window.electron.send('close-modal');
-        window.electron.send('close-main-window');
-      }).catch(err => console.error('Error creating project:', err));
+      });
     });
     
 function updateInput(el) {

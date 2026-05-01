@@ -8,10 +8,22 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
   router.get("/", async (req, res) => {
     try {
       const r = await pool.query(
-        `SELECT id, name, thumbnail, width, height, owner_id, frame_ids, created_at
-         FROM projects
-         WHERE owner_id = $1
-         ORDER BY created_at DESC, id DESC`,
+        `SELECT p.id,
+                p.name,
+                p.thumbnail,
+                p.width,
+                p.height,
+                p.owner_id,
+                p.frame_ids,
+                p.created_at,
+                CASE WHEN p.owner_id = $1 THEN 'owner' ELSE 'invited' END AS membership
+         FROM projects p
+         WHERE p.owner_id = $1
+            OR EXISTS (
+              SELECT 1 FROM invites i
+              WHERE i.project_id = p.id AND i.sent_to = $1
+            )
+         ORDER BY p.created_at DESC, p.id DESC`,
         [req.user.id],
       );
       return res.json({ projects: r.rows });

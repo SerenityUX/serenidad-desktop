@@ -13,7 +13,7 @@ const menuBtn = {
   fontSize: 14,
 };
 
-const ProfileAvatarMenu = ({ user, size = 24 }) => {
+const ProfileAvatarMenu = ({ user, size = 24, onPickWorkspaceFolder }) => {
   const { logout, uploadProfilePicture } = useAuth();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -94,6 +94,19 @@ const ProfileAvatarMenu = ({ user, size = 24 }) => {
           >
             Change profile picture
           </button>
+          {typeof onPickWorkspaceFolder === "function" ? (
+            <button
+              type="button"
+              role="menuitem"
+              style={{ ...menuBtn, borderTop: "1px solid #eee" }}
+              onClick={() => {
+                onPickWorkspaceFolder();
+                setOpen(false);
+              }}
+            >
+              Workspace folder…
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"

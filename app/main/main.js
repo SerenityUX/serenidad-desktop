@@ -73,6 +73,8 @@ function updatePaths() {
 let manageWindow;
 
 let mainWindow;
+/** Workspace folder path passed when opening the new-project modal (for API + local create). */
+let modalWorkspaceFolderPath = null;
 let modalWindow;
 
 let generatingVoicelines = new Set();
@@ -1527,7 +1529,7 @@ app.on('window-all-closed', () => {
 
 // Listen for createProject event
 ipcMain.handle('createProject', async (event, projectDetails) => {
-    const { folderPath, projectName, projectFolder, width, height } = projectDetails;
+    const { folderPath, projectName, projectFolder, width, height, apiProjectId } = projectDetails;
   
     const projectDir = path.join(folderPath, 'Projects', projectFolder);
     const modelsDir = path.join(folderPath, 'Models');
@@ -1566,6 +1568,7 @@ ipcMain.handle('createProject', async (event, projectDetails) => {
     const projectFilePath = path.join(projectDir, 'project.kodan');
     const projectData = {
       name: projectName,
+      ...(apiProjectId ? { api_project_id: apiProjectId } : {}),
       scenes: [
         {
           id: Math.floor(Math.random() * (1000000000 - 0 + 1)),
@@ -1622,6 +1625,35 @@ ipcMain.handle('get-lora-modules', async () => {
     return [];
   }
 });
+
+ipcMain.handle('get-project-local-index', async (event, folderPath) => {
+  const index = {};
+  if (!folderPath || typeof folderPath !== 'string') {
+    return index;
+  }
+  const projectsPath = path.join(folderPath, 'Projects');
+  if (!fs.existsSync(projectsPath)) {
+    return index;
+  }
+  for (const dir of fs.readdirSync(projectsPath)) {
+    const kodanPath = path.join(projectsPath, dir, 'project.kodan');
+    if (!fs.existsSync(kodanPath)) {
+      continue;
+    }
+    try {
+      const raw = fs.readFileSync(kodanPath, 'utf8');
+      const json = JSON.parse(raw);
+      if (json.api_project_id) {
+        index[String(json.api_project_id)] = kodanPath;
+      }
+    } catch (_err) {
+      /* skip malformed */
+    }
+  }
+  return index;
+});
+
+ipcMain.handle('get-modal-workspace-folder', () => modalWorkspaceFolderPath);
 
 ipcMain.handle('get-project-data', async (event, folderPath) => {
   const projectsPath = path.join(folderPath, 'Projects');
@@ -1689,9 +1721,16 @@ ipcMain.handle('open-scene-folder', async (event, projectFilePath, sceneIndex) =
   }
 });
 
-// IPC listener for opening the modal window
-ipcMain.on('open-modal', () => {
-  createModalWindow(); // Opens the modal window when the signal is received
+ipcMain.on('open-modal', (_event, folderPath) => {
+  modalWorkspaceFolderPath =
+    folderPath === undefined || folderPath === null ? null : String(folderPath);
+  createModalWindow();
+});
+
+ipcMain.on('create-project-from-modal', (_event, details) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('create-project-submit', details);
+  }
 });
 
 ipcMain.on('open-project', (event, projectFilePath) => {
