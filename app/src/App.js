@@ -6,21 +6,7 @@ import { apiUrl } from "./config";
 
 const MainApp = () => {
   const { token } = useAuth();
-  const [folderPath, setFolderPath] = useState(() =>
-    typeof localStorage !== "undefined"
-      ? localStorage.getItem("kodanFolder")
-      : null,
-  );
   const [projects, setProjects] = useState([]);
-
-  const persistFolder = useCallback((selected) => {
-    if (selected) {
-      localStorage.setItem("kodanFolder", selected);
-    } else {
-      localStorage.removeItem("kodanFolder");
-    }
-    setFolderPath(selected);
-  }, []);
 
   const refreshProjects = useCallback(async () => {
     if (!token) return;
@@ -37,39 +23,16 @@ const MainApp = () => {
         setProjects([]);
         return;
       }
-      let list = data.projects || [];
-      if (folderPath) {
-        try {
-          const index = await window.electron.invoke(
-            "get-project-local-index",
-            folderPath,
-          );
-          list = list.map((p) => ({
-            ...p,
-            path: index[String(p.id)] || null,
-            lastEdited: p.created_at,
-          }));
-        } catch (e) {
-          console.error(e);
-          list = list.map((p) => ({
-            ...p,
-            path: null,
-            lastEdited: p.created_at,
-          }));
-        }
-      } else {
-        list = list.map((p) => ({
-          ...p,
-          path: null,
-          lastEdited: p.created_at,
-        }));
-      }
+      const list = (data.projects || []).map((p) => ({
+        ...p,
+        lastEdited: p.created_at,
+      }));
       setProjects(list);
     } catch (e) {
       console.error(e);
       setProjects([]);
     }
-  }, [token, folderPath]);
+  }, [token]);
 
   useEffect(() => {
     refreshProjects();
@@ -79,20 +42,9 @@ const MainApp = () => {
     if (!token) return undefined;
     const unsub = window.electron.ipcRenderer.on(
       "create-project-submit",
-      async (_event, payload) => {
-        const {
-          folderPath: ws,
-          projectName,
-          projectFolder,
-          width,
-          height,
-        } = payload;
-        if (!ws) {
-          window.alert(
-            "Select a workspace folder first (profile menu → Workspace folder…).",
-          );
-          return;
-        }
+      /** Preload forwards only payload args (not the IPC event). */
+      async (payload) => {
+        const { projectName, width, height } = payload || {};
         const w =
           Number.parseInt(String(width).replace(/\D/g, ""), 10) || 1920;
         const h =
@@ -114,16 +66,12 @@ const MainApp = () => {
           if (!res.ok) {
             throw new Error(body.error || "Could not create project");
           }
-          await window.electron.createProject({
-            folderPath: ws,
-            projectName: String(projectName || "").trim(),
-            projectFolder,
-            width: w,
-            height: h,
-            apiProjectId: body.id,
-          });
           window.electron.ipcRenderer.send("close-modal");
           await refreshProjects();
+          await window.electron.openProjectWindow({
+            projectId: body.id,
+            token,
+          });
         } catch (err) {
           console.error(err);
           window.alert(err.message || "Create failed");
@@ -133,17 +81,6 @@ const MainApp = () => {
     return () => unsub();
   }, [token, refreshProjects]);
 
-  const handleSelectFolder = async () => {
-    try {
-      const selected = await window.electron.selectFolder();
-      if (selected) {
-        persistFolder(selected);
-      }
-    } catch (error) {
-      console.error("Failed to select folder:", error);
-    }
-  };
-
   return (
     <div
       style={{
@@ -151,11 +88,7 @@ const MainApp = () => {
           '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
       }}
     >
-      <FolderView
-        projects={projects}
-        workspaceFolder={folderPath}
-        onSelectWorkspace={handleSelectFolder}
-      />
+      <FolderView projects={projects} />
     </div>
   );
 };

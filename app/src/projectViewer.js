@@ -3,10 +3,18 @@ import { createRoot } from 'react-dom/client';
 import ProjectComponent from './components/editor/ProjectComponent';
 
 const urlParams = new URLSearchParams(window.location.search);
-const rawPath = urlParams.get('filePath');
-const filePath = rawPath ? decodeURIComponent(rawPath) : null;
+const projectIdRaw = urlParams.get('projectId');
+const projectId = projectIdRaw ? decodeURIComponent(projectIdRaw).trim() : null;
 
 const container = document.getElementById('root');
 const root = createRoot(container);
 
-root.render(<ProjectComponent filePath={filePath} />);
+if (!projectId) {
+  root.render(
+    <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
+      Missing project id. Close this window and open a project from the launcher.
+    </div>,
+  );
+} else {
+  root.render(<ProjectComponent projectId={projectId} />);
+}

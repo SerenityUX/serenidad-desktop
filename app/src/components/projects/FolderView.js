@@ -17,12 +17,8 @@ const createBtnStyle = {
   lineHeight: 1.2,
 };
 
-const FolderView = ({
-  projects,
-  workspaceFolder,
-  onSelectWorkspace,
-}) => {
-  const { user } = useAuth();
+const FolderView = ({ projects }) => {
+  const { user, token } = useAuth();
   const [isOverlayVisible, setOverlayVisible] = useState(false);
 
   useEffect(() => {
@@ -33,17 +29,20 @@ const FolderView = ({
   }, []);
 
   const openCreateProjectModal = () => {
-    window.electron.ipcRenderer.send('open-modal', workspaceFolder ?? null);
+    window.electron.ipcRenderer.send('open-modal');
     setOverlayVisible(true);
   };
 
-  const handleProjectClick = (project) => {
-    if (project.path) {
-      window.electron.ipcRenderer.send('open-project', project.path);
-    } else {
-      window.alert(
-        'This project has no local folder in your workspace yet. Select a workspace folder and create the project from here, or open it after syncing.',
-      );
+  const handleProjectClick = async (project) => {
+    if (!token || !project?.id) return;
+    try {
+      await window.electron.openProjectWindow({
+        projectId: String(project.id),
+        token,
+      });
+    } catch (e) {
+      console.error(e);
+      window.alert('Could not open project.');
     }
   };
 
@@ -65,11 +64,7 @@ const FolderView = ({
           justifyContent: 'flex-start',
         }}
         >
-          <ProfileAvatarMenu
-            user={user}
-            size={24}
-            onPickWorkspaceFolder={onSelectWorkspace}
-          />
+          <ProfileAvatarMenu user={user} size={24} />
         </div>
         <p style={{
           fontSize: 24,
@@ -116,18 +111,17 @@ const FolderView = ({
         ))}
       </div>
 
-      <div
-        aria-hidden={!isOverlayVisible}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9999,
-          backgroundColor: '#000',
-          pointerEvents: isOverlayVisible ? 'auto' : 'none',
-          opacity: isOverlayVisible ? 0.5 : 0,
-          transition: 'opacity 0.3s ease-out',
-        }}
-      />
+      {isOverlayVisible ? (
+        <div
+          aria-hidden={false}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+          }}
+        />
+      ) : null}
     </div>
   );
 };

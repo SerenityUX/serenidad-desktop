@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electron', {
+  getViewerAuthToken: () => ipcRenderer.invoke('get-viewer-auth-token'),
+  openProjectWindow: (payload) => ipcRenderer.invoke('open-project-window', payload),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   openExternalLink: (url) => ipcRenderer.invoke('open-external-link', url),
   closeWindow: () => ipcRenderer.send('close-window'),

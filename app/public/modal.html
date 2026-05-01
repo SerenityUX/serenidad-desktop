@@ -79,15 +79,7 @@
       const width = document.getElementById('widthInput').value;
       const height = document.getElementById('heightInput').value;
 
-      let folderPath = null;
-      try {
-        folderPath = await window.electron.invoke('get-modal-workspace-folder');
-      } catch (e) {
-        console.error(e);
-      }
-
       window.electron.send('create-project-from-modal', {
-        folderPath,
         projectName,
         projectFolder,
         width,

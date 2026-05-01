@@ -73,8 +73,8 @@ function updatePaths() {
 let manageWindow;
 
 let mainWindow;
-/** Workspace folder path passed when opening the new-project modal (for API + local create). */
-let modalWorkspaceFolderPath = null;
+/** Bearer token for the project viewer window (same session as launcher). Cleared when viewer closes. */
+let viewerAuthToken = null;
 let modalWindow;
 
 let generatingVoicelines = new Set();
@@ -545,7 +545,18 @@ function createWindow() {
 }
 
 function createModalWindow() {
-    modalWindow = new BrowserWindow({
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    console.error('createModalWindow: main window is missing');
+    return;
+  }
+
+  if (modalWindow && !modalWindow.isDestroyed()) {
+    modalWindow.focus();
+    modalWindow.show();
+    return;
+  }
+
+  modalWindow = new BrowserWindow({
     parent: mainWindow,
     icon: getAppIconPath(),
     modal: false,
@@ -557,7 +568,7 @@ function createModalWindow() {
     minimizable: false,
     maximizable: false,
     closable: true, // The modal window itself is closable
-    title: "New Project",
+    title: 'New Project',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -565,24 +576,41 @@ function createModalWindow() {
     },
   });
 
-  modalWindow.loadFile(path.join(__dirname, '../public/modal.html'));
-  
-  modalWindow.once('ready-to-show', () => {
-    // Disable closing the main window when the modal is ready to be shown
+  let shown = false;
+  const showModal = () => {
+    if (shown || !modalWindow || modalWindow.isDestroyed()) return;
+    shown = true;
     mainWindow.setClosable(false);
     mainWindow.setMinimizable(false);
-
     modalWindow.show();
+  };
+
+  modalWindow.once('ready-to-show', showModal);
+  modalWindow.webContents.once('did-finish-load', () => {
+    showModal();
   });
 
-  // Re-enable closing the main window when the modal is closed
+  modalWindow.webContents.once('did-fail-load', (_event, code, desc) => {
+    console.error('modal did-fail-load:', code, desc);
+    try {
+      showModal();
+    } catch (_e) {
+      /* ignore */
+    }
+  });
+
+  modalWindow.loadFile(path.join(__dirname, '../public/modal.html')).catch((err) => {
+    console.error('modal loadFile:', err);
+  });
+
   modalWindow.on('closed', () => {
-    mainWindow.setClosable(true);
-    mainWindow.setMinimizable(true);
-    mainWindow.webContents.send('close-modal'); // Send message to hide overlay
-
+    modalWindow = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setClosable(true);
+      mainWindow.setMinimizable(true);
+      mainWindow.webContents.send('close-modal'); // hide launcher overlay
+    }
   });
-
 }
 
 function ensureVoicesDirectory(projectRootPath) {
@@ -597,11 +625,12 @@ function ensureVoicesDirectory(projectRootPath) {
   }
 }
 
-function createProjectWindow(projectFilePath) {
+function createProjectWindow(projectId) {
+  if (!projectId || typeof projectId !== 'string') {
+    console.error('createProjectWindow: missing projectId');
+    return;
+  }
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  rootFolder = projectFilePath.split("/Projects")[0]
-  
-  ensureVoicesDirectory(rootFolder)
   const projectWindow = new BrowserWindow({
     width,
     height,
@@ -610,8 +639,8 @@ function createProjectWindow(projectFilePath) {
     minimizable: true,
     maximizable: true,
     closable: true,
-    frame: false, 
-    title: "Project Viewer",
+    frame: false,
+    title: 'Project Viewer',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -621,11 +650,11 @@ function createProjectWindow(projectFilePath) {
 
   const viewerHtmlPath = path.join(__dirname, '../dist/project-viewer.html');
   const viewerUrl = new URL(pathToFileURL(viewerHtmlPath).href);
-  viewerUrl.searchParams.set('filePath', projectFilePath);
+  viewerUrl.searchParams.set('projectId', projectId);
   projectWindow.loadURL(viewerUrl.href);
 
   projectWindow.on('closed', () => {
-    // Optional: Handle any cleanup or state management here
+    viewerAuthToken = null;
   });
 }
 
@@ -1653,7 +1682,21 @@ ipcMain.handle('get-project-local-index', async (event, folderPath) => {
   return index;
 });
 
-ipcMain.handle('get-modal-workspace-folder', () => modalWorkspaceFolderPath);
+ipcMain.handle('get-viewer-auth-token', async () => viewerAuthToken);
+
+ipcMain.handle('open-project-window', async (_event, payload) => {
+  const projectId = payload && typeof payload.projectId === 'string' ? payload.projectId : null;
+  const token =
+    payload && typeof payload.token === 'string' && payload.token.trim()
+      ? payload.token.trim()
+      : null;
+  if (!projectId) {
+    return false;
+  }
+  viewerAuthToken = token;
+  createProjectWindow(projectId);
+  return true;
+});
 
 ipcMain.handle('get-project-data', async (event, folderPath) => {
   const projectsPath = path.join(folderPath, 'Projects');
@@ -1721,9 +1764,7 @@ ipcMain.handle('open-scene-folder', async (event, projectFilePath, sceneIndex) =
   }
 });
 
-ipcMain.on('open-modal', (_event, folderPath) => {
-  modalWorkspaceFolderPath =
-    folderPath === undefined || folderPath === null ? null : String(folderPath);
+ipcMain.on('open-modal', () => {
   createModalWindow();
 });
 
@@ -1732,11 +1773,6 @@ ipcMain.on('create-project-from-modal', (_event, details) => {
     mainWindow.webContents.send('create-project-submit', details);
   }
 });
-
-ipcMain.on('open-project', (event, projectFilePath) => {
-  createProjectWindow(projectFilePath);
-});
-
 
   // Close the modal window
   ipcMain.on('close-modal', () => {

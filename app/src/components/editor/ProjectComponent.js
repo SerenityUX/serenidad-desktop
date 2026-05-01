@@ -4,8 +4,44 @@ import { useInterval } from 'react-use';
 import ollama from 'ollama/browser';
 
 import animeFacts from '../../data/animeFacts.json';
+import { apiUrl } from '../../config';
 import EditorLayout from './EditorLayout';
 import ComposeLayout from './ComposeLayout';
+
+const REMOTE_CAPTION_DEFAULT = {
+  fontSize: 16,
+  captionColor: '#FFE600',
+  caption: '',
+  strokeColor: '#000000',
+  strokeSize: 1.5,
+  selectedFont: 'Arial',
+  selectedWeight: '700',
+};
+
+/** Maps GET /projects/:id + frames rows into the legacy scene-shaped structure the editor expects. */
+function remoteDetailToProjectData(projectRow, frames) {
+  return {
+    name: projectRow.name,
+    scenes: (frames || []).map((f) => {
+      const meta = f.meta && typeof f.meta === 'object' ? f.meta : {};
+      return {
+        frameId: f.id,
+        id: f.id,
+        thumbnail: f.result || '',
+        positivePrompt: f.prompt || '',
+        negativePrompt: f.negative_prompt || '',
+        voiceline: meta.voiceline || '',
+        speaker: meta.speaker || 'Narrator',
+        baseModel: meta.baseModel || '',
+        selectedLora: meta.selectedLora || '',
+        captionSettings: {
+          ...REMOTE_CAPTION_DEFAULT,
+          ...(meta.captionSettings || {}),
+        },
+      };
+    }),
+  };
+}
 
 const weightToLabel = (weight) => {
   const map = {
@@ -22,7 +58,8 @@ const weightToLabel = (weight) => {
   return map[weight] || weight.toString();
 };
 
-const ProjectComponent = ({ filePath }) => {
+const ProjectComponent = ({ projectId }) => {
+  const isRemote = Boolean(projectId);
   // Mode flags
   const [composeMode, setComposeMode] = useState(false);
   const [composeComplete, setComposeComplete] = useState(false);
@@ -95,6 +132,112 @@ const ProjectComponent = ({ filePath }) => {
   // Export
   const [canExportClip, setCanExportClip] = useState(false);
 
+  const [authToken, setAuthToken] = useState(null);
+  const [authResolved, setAuthResolved] = useState(false);
+
+  const patchFrame = useCallback(
+    async (frameId, body) => {
+      if (!authToken || !projectId || !frameId) return;
+      const res = await fetch(
+        apiUrl(
+          `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(frameId)}`,
+        ),
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(body),
+        },
+      );
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || res.statusText || 'Request failed');
+      }
+    },
+    [authToken, projectId],
+  );
+
+  const refetchRemoteProject = useCallback(async () => {
+    if (!authToken || !projectId) return null;
+    const res = await fetch(apiUrl(`/projects/${encodeURIComponent(projectId)}`), {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        Accept: 'application/json',
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error(data.error || res.status);
+      return null;
+    }
+    const pd = remoteDetailToProjectData(data.project, data.frames || []);
+    setProjectData(pd);
+    return pd;
+  }, [authToken, projectId]);
+
+  useEffect(() => {
+    if (!isRemote) {
+      setAuthResolved(true);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const t = await window.electron.getViewerAuthToken();
+        if (!cancelled) {
+          setAuthToken(t || null);
+          setAuthResolved(true);
+        }
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setAuthResolved(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isRemote]);
+
+  useEffect(() => {
+    if (!isRemote || !projectId || !authToken) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(apiUrl(`/projects/${encodeURIComponent(projectId)}`), {
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            Accept: 'application/json',
+          },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || cancelled) {
+          console.error(data.error || res.status);
+          return;
+        }
+        const pd = remoteDetailToProjectData(data.project, data.frames || []);
+        setProjectData(pd);
+        const pw = data.project.width || 1920;
+        const ph = data.project.height || 1080;
+        setImgW(pw);
+        setImgH(ph);
+        setAspectRatio(pw / ph);
+        if (pd.scenes.length > 0) {
+          const s = pd.scenes[0];
+          if (s.thumbnail) loadThumbnail(s.thumbnail);
+          else setThumbnail('');
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isRemote, projectId, authToken]);
+
   // ---------- Compose: enrich story via ollama ----------
   const fetchEnrichment = async () => {
     const message = {
@@ -150,32 +293,12 @@ const ProjectComponent = ({ filePath }) => {
   };
 
   // ---------- Voice generation ----------
-  const generateVoiceLine = async (sceneIndex) => {
-    const outputLocation = `${filePath.split('/project.kodan')[0]}/Voicelines/${sceneIndex}.mp3`;
-    const language = 'en';
-
-    setIsGeneratingVoice(true);
-    setGenerateText('Generating');
-
-    window.electron.send('run-voice-model', {
-      prompt: voiceText,
-      outputLocation,
-      speakerWav,
-      language,
-    });
-
-    window.electron.once('voice-model-response', (event, response) => {
-      setIsGeneratingVoice(false);
-      setGenerateText('Generate Voice');
-      if (response.success) {
-        console.log('Voice generation completed successfully!');
-      } else {
-        console.error('Voice generation failed:', response.message);
-      }
-    });
+  const generateVoiceLine = async (_sceneIndex) => {
+    window.alert('Voice generation is not available for cloud-only projects in this build.');
   };
 
   useEffect(() => {
+    if (isRemote) return undefined;
     const checkVoiceGenerationStatus = async () => {
       const status = await window.electron.ipcRenderer.invoke('check-voice-generation-status', selectedScene);
       setIsGeneratingVoice(status);
@@ -184,7 +307,7 @@ const ProjectComponent = ({ filePath }) => {
     checkVoiceGenerationStatus();
     const intervalId = setInterval(checkVoiceGenerationStatus, 1000);
     return () => clearInterval(intervalId);
-  }, [selectedScene]);
+  }, [selectedScene, isRemote]);
 
   // ---------- Keyboard scene navigation ----------
   useEffect(() => {
@@ -208,49 +331,18 @@ const ProjectComponent = ({ filePath }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [projectData, selectedScene]);
 
-  // ---------- Watch for mp4 vs png updates ----------
+  // ---------- Remote frames: show image/video URL from SQL `frames.result` ----------
   useEffect(() => {
-    const intervalId = setInterval(async () => {
-      if (projectData && projectData.scenes.length > 0) {
-        const scene = projectData.scenes[selectedScene - 1];
-        const mp4Path = `${filePath.split('/project.kodan')[0]}/Clips/${selectedScene}.mp4`;
-        const fileModifiedTime = await window.electron.ipcRenderer.invoke('check-file-updated', mp4Path);
-
-        if (fileModifiedTime) {
-          setThumbnail(`${mp4Path}`);
-          setRefreshKey(Date.now());
-          setVideoKey(fileModifiedTime);
-          const duration = await window.electron.ipcRenderer.invoke('get-video-duration', mp4Path);
-          setSceneDuration(duration);
-        } else {
-          loadThumbnail(scene.thumbnail);
-          setSceneDuration(null);
-        }
-      }
-    }, 1000);
-    return () => clearInterval(intervalId);
-  }, [projectData, selectedScene, refreshKey]);
-
-  // ---------- Initial project load ----------
-  useEffect(() => {
-    if (!filePath) {
-      console.error('Project viewer: missing filePath (check window URL query).');
-      return;
+    if (!isRemote || !projectData?.scenes?.length) return;
+    const scene = projectData.scenes[selectedScene - 1];
+    if (scene?.thumbnail) {
+      loadThumbnail(scene.thumbnail);
+    } else {
+      setThumbnail('');
     }
-    const loadProjectData = async () => {
-      try {
-        const data = await window.electron.invoke('read-project-kodan', filePath);
-        setProjectData(data);
-        if (data?.scenes?.length > 0) {
-          const scene = data.scenes[selectedScene - 1];
-          if (scene?.thumbnail) loadThumbnail(scene.thumbnail);
-        }
-      } catch (error) {
-        console.error('Error loading project:', error);
-      }
-    };
-    loadProjectData();
-  }, [filePath, selectedScene]);
+    setSceneDuration(null);
+    setVideoKey(null);
+  }, [isRemote, selectedScene, projectData]);
 
   const loadThumbnail = (thumbnailPath) => {
     const img = new Image();
@@ -268,26 +360,28 @@ const ProjectComponent = ({ filePath }) => {
   };
 
   // ---------- Image generation ----------
-  const generateImage = async (sceneIndex) => {
-    window.electron.send('run-model', {
-      outputPath: filePath.split('/project.kodan')[0] + `/Images/${sceneIndex}.png`,
-      aspectRatio,
-      prompt,
-      negativePrompt,
-      width: imgW,
-      height: imgH,
-      sceneIndex,
-      baseModel,
-      loraModule: selectedLora,
-    });
+  const generateImage = async (_sceneIndex) => {
+    window.alert('Local GPU generation is disabled for cloud-backed projects in this build.');
   };
 
   const addNewScene = () => {
-    window.electron.ipcRenderer.invoke('add-new-scene', filePath, aspectRatio)
-      .then((updatedProjectData) => {
-        setProjectData(updatedProjectData);
+    if (!authToken || !projectId) return;
+    fetch(apiUrl(`/projects/${encodeURIComponent(projectId)}/frames`), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        Accept: 'application/json',
+      },
+    })
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Add scene failed');
+        return refetchRemoteProject();
+      })
+      .then((pd) => {
+        if (!pd) return;
         setVoiceText('');
-        setSelectedScene(updatedProjectData.scenes.length);
+        setSelectedScene(pd.scenes.length);
         setNegativePrompt('');
         setPrompt('');
       })
@@ -368,54 +462,84 @@ const ProjectComponent = ({ filePath }) => {
     }
   }, [selectedScene, projectData]);
 
-  // ---------- Debounced persistence ----------
+  // ---------- Debounced persistence (frames table via API) ----------
   const updateCaptionSettings = useCallback(
     debounce(async (newSettings) => {
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      if (!scene?.frameId || !authToken) return;
       try {
         const updatedSettings = { ...captionSettings, ...newSettings };
-        await window.electron.ipcRenderer.invoke('update-scene-caption', filePath, selectedScene, updatedSettings);
-        if (thumbnail) {
-          const refreshedThumbnail = await window.electron.ipcRenderer.invoke('update-caption', filePath, selectedScene, updatedSettings);
-          setThumbnail(refreshedThumbnail);
-          setProjectData((prevData) => ({
-            ...prevData,
-            scenes: prevData.scenes.map((scene, index) =>
-              index === selectedScene - 1
-                ? { ...scene, thumbnail: refreshedThumbnail, captionSettings: updatedSettings }
-                : scene,
-            ),
-          }));
-          setCaptionSettings(updatedSettings);
-        }
+        await patchFrame(scene.frameId, {
+          meta: { captionSettings: updatedSettings },
+        });
+        setProjectData((prevData) => ({
+          ...prevData,
+          scenes: prevData.scenes.map((s, index) =>
+            index === selectedScene - 1 ? { ...s, captionSettings: updatedSettings } : s,
+          ),
+        }));
+        setCaptionSettings(updatedSettings);
       } catch (error) {
         console.error('Failed to update scene caption settings:', error);
       }
     }, 500),
-    [filePath, selectedScene, thumbnail, captionSettings],
+    [selectedScene, projectData, captionSettings, patchFrame, authToken],
   );
 
   const updateScenePrompts = useCallback(
     debounce((positivePrompt, negativePromptValue) => {
-      window.electron.ipcRenderer.invoke('update-scene-prompts', filePath, selectedScene, positivePrompt, negativePromptValue)
-        .catch((error) => console.error('Failed to update scene prompts:', error));
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      if (!scene?.frameId || !authToken) return;
+      patchFrame(scene.frameId, {
+        prompt: positivePrompt,
+        negative_prompt: negativePromptValue,
+      }).catch((error) => console.error('Failed to update scene prompts:', error));
+      setProjectData((prev) => ({
+        ...prev,
+        scenes: prev.scenes.map((s, i) =>
+          i === selectedScene - 1
+            ? { ...s, positivePrompt, negativePrompt: negativePromptValue }
+            : s,
+        ),
+      }));
     }, 500),
-    [filePath, selectedScene],
+    [selectedScene, projectData, patchFrame, authToken],
   );
 
   const updateSceneVoiceline = useCallback(
     debounce((voiceline, speaker) => {
-      window.electron.ipcRenderer.invoke('update-scene-voiceline', filePath, selectedScene, voiceline, speaker)
-        .catch((error) => console.error('Failed to update scene voiceline and speaker:', error));
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      if (!scene?.frameId || !authToken) return;
+      patchFrame(scene.frameId, {
+        meta: { voiceline, speaker },
+      }).catch((error) => console.error('Failed to update scene voiceline and speaker:', error));
+      setProjectData((prev) => ({
+        ...prev,
+        scenes: prev.scenes.map((s, i) =>
+          i === selectedScene - 1 ? { ...s, voiceline, speaker } : s,
+        ),
+      }));
     }, 500),
-    [filePath, selectedScene],
+    [selectedScene, projectData, patchFrame, authToken],
   );
 
   const updateSceneModelSettings = useCallback(
     debounce((baseModelValue, selectedLoraValue) => {
-      window.electron.ipcRenderer.invoke('update-scene-model-settings', filePath, selectedScene, baseModelValue, selectedLoraValue)
-        .catch((error) => console.error('Failed to update scene model settings:', error));
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      if (!scene?.frameId || !authToken) return;
+      patchFrame(scene.frameId, {
+        meta: { baseModel: baseModelValue, selectedLora: selectedLoraValue },
+      }).catch((error) => console.error('Failed to update scene model settings:', error));
+      setProjectData((prev) => ({
+        ...prev,
+        scenes: prev.scenes.map((s, i) =>
+          i === selectedScene - 1
+            ? { ...s, baseModel: baseModelValue, selectedLora: selectedLoraValue }
+            : s,
+        ),
+      }));
     }, 500),
-    [filePath, selectedScene],
+    [selectedScene, projectData, patchFrame, authToken],
   );
 
   // ---------- Form change handlers ----------
@@ -449,42 +573,50 @@ const ProjectComponent = ({ filePath }) => {
 
   // ---------- Scenes strip ----------
   const handleDeleteScene = (index) => {
-    window.electron.ipcRenderer.invoke('delete-scene', filePath, index + 1)
-      .then((updatedProjectData) => {
-        if (updatedProjectData) {
-          setDeletingScenes((prev) => new Set(prev).add(index + 1));
-          if (sceneRefs.current[index + 1]) {
-            sceneRefs.current[index + 1].style.width = '0px';
-            sceneRefs.current[index + 1].style.height = '0px';
-            sceneRefs.current[index + 1].style.opacity = '0';
-            sceneRefs.current[index + 1].style.margin = '0';
-            sceneRefs.current[index + 1].style.padding = '0';
-          }
-          setTimeout(() => {
-            setProjectData(updatedProjectData);
-            setVoiceText('');
-            if (index + 1 <= selectedScene) {
-              setSelectedScene(Math.max(1, selectedScene - 1));
-            }
-            setDeletingScenes((prev) => {
-              const newSet = new Set(prev);
-              newSet.delete(index + 1);
-              return newSet;
-            });
-          }, 300);
+    const scene = projectData?.scenes?.[index];
+    const frameId = scene?.frameId;
+    if (!frameId || !authToken || !projectId || !projectData) return;
+    if (projectData.scenes.length <= 1) {
+      window.alert('Keep at least one scene.');
+      return;
+    }
+    if (!window.confirm('Delete this scene?')) return;
+    fetch(
+      apiUrl(
+        `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(frameId)}`,
+      ),
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          Accept: 'application/json',
+        },
+      },
+    )
+      .then(async (res) => {
+        if (!res.ok && res.status !== 204) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Delete failed');
+        }
+        return refetchRemoteProject();
+      })
+      .then((updated) => {
+        if (!updated) return;
+        setVoiceText('');
+        if (index + 1 <= selectedScene) {
+          setSelectedScene(Math.max(1, selectedScene - 1));
         }
       })
       .catch((error) => console.error('Failed to delete scene:', error));
   };
 
-  const handleOpenFolder = (sceneIndex) => {
-    window.electron.ipcRenderer.invoke('open-scene-folder', filePath, sceneIndex)
-      .catch((error) => console.error('Failed to open scene folder:', error));
+  const handleOpenFolder = (_sceneIndex) => {
+    /* Local-project feature; cloud frames have no folder on disk. */
   };
 
   // ---------- Fonts ----------
   useEffect(() => {
-    setSelectedScene(2);
+    setSelectedScene(1);
     const fetchFonts = async () => {
       try {
         const fonts = await window.electron.ipcRenderer.invoke('get-system-fonts');
@@ -537,29 +669,37 @@ const ProjectComponent = ({ filePath }) => {
   const handleCaptionChange = (event) => setLocalCaption(event.target.value);
   const handleCaptionBlur = () => updateCaptionSettings({ caption: localCaption });
 
-  // ---------- Models ----------
-  useEffect(() => {
-    fetchBaseModels();
-    fetchLoraModules();
-  }, []);
-
+  // ---------- Models (local GPU weights only; cloud projects skip) ----------
   const fetchBaseModels = useCallback(async () => {
+    if (isRemote) {
+      setBaseModels([]);
+      return;
+    }
     try {
       const models = await window.electron.ipcRenderer.invoke('get-base-models');
       setBaseModels(models);
     } catch (error) {
       console.error('Failed to fetch base models:', error);
     }
-  }, []);
+  }, [isRemote]);
 
   const fetchLoraModules = useCallback(async () => {
+    if (isRemote) {
+      setLoraModules([]);
+      return;
+    }
     try {
       const modules = await window.electron.ipcRenderer.invoke('get-lora-modules');
       setLoraModules(modules);
     } catch (error) {
       console.error('Failed to fetch LoRA modules:', error);
     }
-  }, []);
+  }, [isRemote]);
+
+  useEffect(() => {
+    fetchBaseModels();
+    fetchLoraModules();
+  }, [fetchBaseModels, fetchLoraModules]);
 
   const handleBaseModelChange = async (event) => {
     const newBaseModel = event.target.value;
@@ -587,9 +727,15 @@ const ProjectComponent = ({ filePath }) => {
   }, [selectedScene]);
 
   // ---------- Voices ----------
-  useEffect(() => { loadVoices(); }, []);
+  useEffect(() => {
+    loadVoices();
+  }, [isRemote]);
 
   const loadVoices = async () => {
+    if (isRemote) {
+      setVoices([]);
+      return;
+    }
     try {
       const voiceFiles = await window.electron.ipcRenderer.invoke('get-voices');
       setVoices(voiceFiles);
@@ -599,6 +745,10 @@ const ProjectComponent = ({ filePath }) => {
   };
 
   const handleAddVoice = async () => {
+    if (isRemote) {
+      window.alert('Voice files live on disk in this app; cloud-only mode does not add voices yet.');
+      return;
+    }
     try {
       const result = await window.electron.ipcRenderer.invoke('add-voice');
       if (result) {
@@ -615,9 +765,13 @@ const ProjectComponent = ({ filePath }) => {
   // ---------- Export ----------
   useEffect(() => {
     const checkExportability = async () => {
+      if (isRemote) {
+        setCanExportClip(false);
+        return;
+      }
       if (projectData && projectData.scenes[selectedScene - 1]) {
         const scene = projectData.scenes[selectedScene - 1];
-        const mp4Path = `${filePath.split('/project.kodan')[0]}/Clips/${selectedScene}.mp4`;
+        const mp4Path = '';
         const pngPath = scene.thumbnail;
         const mp4Exists = await window.electron.ipcRenderer.invoke('check-file-exists', mp4Path);
         const pngExists = await window.electron.ipcRenderer.invoke('check-file-exists', pngPath);
@@ -625,12 +779,16 @@ const ProjectComponent = ({ filePath }) => {
       }
     };
     checkExportability();
-  }, [projectData, selectedScene, filePath]);
+  }, [projectData, selectedScene, isRemote]);
 
   const handleExportClip = async () => {
+    if (isRemote) {
+      window.alert('Clip export uses local render files; not available for cloud-only projects yet.');
+      return;
+    }
     if (!canExportClip) return;
     const scene = projectData.scenes[selectedScene - 1];
-    const mp4Path = `${filePath.split('/project.kodan')[0]}/Clips/${selectedScene}.mp4`;
+    const mp4Path = '';
     const pngPath = scene.thumbnail;
     try {
       const exportPath = await window.electron.ipcRenderer.invoke('export-clip', mp4Path, pngPath, selectedScene);
@@ -641,13 +799,18 @@ const ProjectComponent = ({ filePath }) => {
   };
 
   const handleExportProject = () => {
-    window.electron.ipcRenderer.invoke('render-project', filePath.split('/project.kodan')[0])
+    if (isRemote) {
+      window.alert('Full render uses local project folders; not available for cloud-only projects yet.');
+      return;
+    }
+    window.electron.ipcRenderer.invoke('render-project', '')
       .then(() => console.log('Rendering completed and opened in Finder.'))
       .catch((error) => console.error('Error rendering project:', error));
   };
 
-  // ---------- Thumbnail freshness polling ----------
+  // ---------- Thumbnail freshness polling (local files only) ----------
   useInterval(() => {
+    if (isRemote) return;
     if (projectData && projectData.scenes) {
       projectData.scenes.forEach(async (scene, index) => {
         const lastModified = await window.electron.ipcRenderer.invoke('check-file-updated', scene.thumbnail);
@@ -670,6 +833,33 @@ const ProjectComponent = ({ filePath }) => {
   }, []);
 
   // ---------- Render ----------
+  if (isRemote) {
+    if (!authResolved) {
+      return (
+        <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>Loading…</div>
+      );
+    }
+    if (!authToken) {
+      return (
+        <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
+          Could not read your session. Close this window and open the project from the launcher again.
+        </div>
+      );
+    }
+    if (!projectId) {
+      return (
+        <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
+          Missing project id in the URL.
+        </div>
+      );
+    }
+    if (!projectData) {
+      return (
+        <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>Loading project…</div>
+      );
+    }
+  }
+
   if (composeMode) {
     return (
       <ComposeLayout
