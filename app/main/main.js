@@ -2120,3 +2120,61 @@ ipcMain.handle('export-clip', async (event, mp4Path, pngPath, sceneNumber) => {
   }
 });
 
+/**
+ * Compose pre-rendered PNG frames into an mp4. Each frame is held on screen
+ * for `secondsPerFrame` seconds. The renderer composes scene+caption into a
+ * PNG using <canvas> (state-driven, like Remotion); ffmpeg only mux/encodes.
+ */
+ipcMain.handle('export-project-mp4', async (event, payload) => {
+  const {
+    pngDataUrls = [],
+    secondsPerFrame = 2,
+    suggestedName = 'export.mp4',
+  } = payload || {};
+  if (!Array.isArray(pngDataUrls) || pngDataUrls.length === 0) {
+    throw new Error('No frames provided to export');
+  }
+
+  const { canceled, filePath: targetPath } = await dialog.showSaveDialog({
+    title: 'Export Project',
+    defaultPath: suggestedName,
+    filters: [{ name: 'Video', extensions: ['mp4'] }],
+  });
+  if (canceled || !targetPath) return null;
+
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kodan-export-'));
+  try {
+    for (let i = 0; i < pngDataUrls.length; i++) {
+      const dataUrl = pngDataUrls[i];
+      const base64 = String(dataUrl).replace(/^data:image\/\w+;base64,/, '');
+      const buf = Buffer.from(base64, 'base64');
+      const name = `frame-${String(i).padStart(4, '0')}.png`;
+      await fs.promises.writeFile(path.join(tmpDir, name), buf);
+    }
+
+    const outPath = targetPath.endsWith('.mp4') ? targetPath : `${targetPath}.mp4`;
+    const inputRate = 1 / Math.max(0.1, Number(secondsPerFrame) || 2);
+
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(path.join(tmpDir, 'frame-%04d.png'))
+        .inputOptions([`-framerate ${inputRate}`])
+        .outputOptions([
+          '-c:v libx264',
+          '-pix_fmt yuv420p',
+          '-r 30',
+          '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+          '-movflags +faststart',
+        ])
+        .on('error', (err) => reject(err))
+        .on('end', () => resolve())
+        .save(outPath);
+    });
+
+    shell.showItemInFolder(outPath);
+    return outPath;
+  } finally {
+    fs.remove(tmpDir).catch(() => {});
+  }
+});
+

@@ -65,7 +65,7 @@ const SceneThumbnail = ({
             aria-label="Delete scene"
             onMouseDown={(e) => e.stopPropagation()}
             onMouseUp={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            onClick={(e) => { e.stopPropagation(); onDelete(e.shiftKey); }}
             style={{
               position: 'absolute',
               top: 21,

@@ -9,6 +9,9 @@ import EditorLayout from './EditorLayout';
 import ComposeLayout from './ComposeLayout';
 import ShareModal from './ShareModal';
 import ProjectLoadingSkeleton from './ProjectLoadingSkeleton';
+import { composeSceneToPng } from '../../lib/composeScene';
+
+const SECONDS_PER_FRAME = 2;
 
 const REMOTE_CAPTION_DEFAULT = {
   fontSize: 16,
@@ -72,6 +75,10 @@ const ProjectComponent = ({ projectId }) => {
   const [projectData, setProjectData] = useState(null);
   const [thumbnail, setThumbnail] = useState('');
   const [aspectRatio, setAspectRatio] = useState(1);
+  /* Stable, project-wide aspect — never overwritten by individual image loads, so
+     scene-strip tiles don't reflow when generated images come back at slightly
+     different dimensions (e.g. nano-banana edit may return a square). */
+  const [projectAspectRatio, setProjectAspectRatio] = useState(16 / 9);
   const [selectedScene, setSelectedScene] = useState(1);
   const [refreshKey, setRefreshKey] = useState(Date.now());
   const [imgW, setImgW] = useState(0);
@@ -241,6 +248,7 @@ const ProjectComponent = ({ projectId }) => {
         setImgW(pw);
         setImgH(ph);
         setAspectRatio(pw / ph);
+        setProjectAspectRatio(pw / ph);
         if (pd.scenes.length > 0) {
           const s = pd.scenes[0];
           if (s.thumbnail) loadThumbnail(s.thumbnail);
@@ -466,26 +474,40 @@ const ProjectComponent = ({ projectId }) => {
       const currentIds = projectData.scenes.map((s) => s.frameId);
       const sourceIdx = currentIds.indexOf(sourceScene.frameId);
       const newOrder = currentIds.slice();
-      if (sourceIdx >= 0) {
-        newOrder.splice(sourceIdx + 1, 0, newFrameId);
-      } else {
-        newOrder.push(newFrameId);
-      }
+      const insertAt = sourceIdx >= 0 ? sourceIdx + 1 : currentIds.length;
+      newOrder.splice(insertAt, 0, newFrameId);
+
+      // Optimistic local update so the new tile pops in next-in-line immediately.
+      setProjectData((prev) => {
+        if (!prev) return prev;
+        const placeholderScene = {
+          frameId: newFrameId,
+          id: newFrameId,
+          thumbnail: '',
+          positivePrompt: '',
+          references: [sourceUrl],
+          model: 'fal-ai/nano-banana/edit',
+          voiceline: '',
+          speaker: 'Narrator',
+          baseModel: '',
+          selectedLora: '',
+          captionSettings: { ...REMOTE_CAPTION_DEFAULT },
+        };
+        const nextScenes = prev.scenes.slice();
+        nextScenes.splice(insertAt, 0, placeholderScene);
+        return { ...prev, scenes: nextScenes };
+      });
+      setVoiceText('');
+      setPrompt('');
+      setSelectedScene(insertAt + 1);
+
       try {
         await reorderFrames(newOrder);
       } catch (e) {
         console.error('Reorder after duplicate failed:', e);
       }
-
-      const pd = await refetchRemoteProject();
-      if (pd) {
-        const newIdx = pd.scenes.findIndex((s) => s.frameId === newFrameId);
-        if (newIdx >= 0) {
-          setVoiceText('');
-          setPrompt('');
-          setSelectedScene(newIdx + 1);
-        }
-      }
+      // Refetch in the background to reconcile any server-side fields.
+      refetchRemoteProject().catch(() => {});
     } catch (e) {
       console.error(e);
       window.alert(e.message || 'Could not duplicate frame');
@@ -576,20 +598,23 @@ const ProjectComponent = ({ projectId }) => {
     setVideoKey(null);
   }, [isRemote, selectedScene, projectData]);
 
-  const loadThumbnail = (thumbnailPath) => {
-    const img = new Image();
-    img.src = thumbnailPath;
-    img.onload = () => {
-      setThumbnail(thumbnailPath);
-      setAspectRatio(img.width / img.height);
-      setImgW(img.width);
-      setImgH(img.height);
-    };
-    img.onerror = () => {
-      setThumbnail(null);
-      console.error('Error loading thumbnail image.');
-    };
-  };
+  const loadThumbnail = (thumbnailPath) =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.src = thumbnailPath;
+      img.onload = () => {
+        setThumbnail(thumbnailPath);
+        setAspectRatio(img.width / img.height);
+        setImgW(img.width);
+        setImgH(img.height);
+        resolve(true);
+      };
+      img.onerror = () => {
+        setThumbnail(null);
+        console.error('Error loading thumbnail image.');
+        resolve(false);
+      };
+    });
 
   // ---------- Image generation ----------
   const generateImage = async (sceneIndex) => {
@@ -633,7 +658,10 @@ const ProjectComponent = ({ projectId }) => {
       }
       const pd = await refetchRemoteProject();
       const thumb = body.frame?.result || pd?.scenes?.[sceneIndex - 1]?.thumbnail;
-      if (thumb) loadThumbnail(thumb);
+      // Wait for the actual image bytes to land in the browser cache before
+      // flipping out of the loading state — otherwise we briefly show the
+      // empty Scene Visual placeholder while the network fetch finishes.
+      if (thumb) await loadThumbnail(thumb);
       setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generated' }));
       setProjectData((prev) => {
         if (!prev) return prev;
@@ -782,27 +810,39 @@ const ProjectComponent = ({ projectId }) => {
   }, [selectedScene, projectData]);
 
   // ---------- Debounced persistence (frames table via API) ----------
-  const updateCaptionSettings = useCallback(
-    debounce(async (newSettings) => {
-      const scene = projectData?.scenes?.[selectedScene - 1];
-      if (!scene?.frameId || !authToken) return;
-      try {
-        const updatedSettings = { ...captionSettings, ...newSettings };
-        await patchFrame(scene.frameId, {
-          meta: { captionSettings: updatedSettings },
-        });
-        setProjectData((prevData) => ({
-          ...prevData,
-          scenes: prevData.scenes.map((s, index) =>
-            index === selectedScene - 1 ? { ...s, captionSettings: updatedSettings } : s,
-          ),
-        }));
-        setCaptionSettings(updatedSettings);
-      } catch (error) {
-        console.error('Failed to update scene caption settings:', error);
-      }
+  const persistCaptionSettings = useCallback(
+    debounce((settingsToPersist, frameId) => {
+      if (!frameId || !authToken) return;
+      patchFrame(frameId, { meta: { captionSettings: settingsToPersist } }).catch((error) =>
+        console.error('Failed to update scene caption settings:', error),
+      );
     }, 500),
-    [selectedScene, projectData, captionSettings, patchFrame, authToken],
+    [patchFrame, authToken],
+  );
+
+  const updateCaptionSettings = useCallback(
+    (newSettings) => {
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      // Optimistic: update local state immediately so the preview reflects
+      // the font/weight/color/size change without waiting for the API.
+      setCaptionSettings((prev) => {
+        const merged = { ...prev, ...newSettings };
+        if (scene?.frameId) {
+          setProjectData((prevData) => {
+            if (!prevData) return prevData;
+            return {
+              ...prevData,
+              scenes: prevData.scenes.map((s, index) =>
+                index === selectedScene - 1 ? { ...s, captionSettings: merged } : s,
+              ),
+            };
+          });
+          persistCaptionSettings(merged, scene.frameId);
+        }
+        return merged;
+      });
+    },
+    [selectedScene, projectData, persistCaptionSettings],
   );
 
   const updateScenePrompts = useCallback(
@@ -1027,7 +1067,7 @@ const ProjectComponent = ({ projectId }) => {
   };
 
   // ---------- Scenes strip ----------
-  const handleDeleteScene = (index) => {
+  const handleDeleteScene = (index, skipConfirm = false) => {
     const scene = projectData?.scenes?.[index];
     const frameId = scene?.frameId;
     if (!frameId || !authToken || !projectId || !projectData) return;
@@ -1035,7 +1075,7 @@ const ProjectComponent = ({ projectId }) => {
       window.alert('Keep at least one scene.');
       return;
     }
-    if (!window.confirm('Delete this scene?')) return;
+    if (!skipConfirm && !window.confirm('Delete this scene? (Hold Shift to skip)')) return;
     fetch(
       apiUrl(
         `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(frameId)}`,
@@ -1076,14 +1116,6 @@ const ProjectComponent = ({ projectId }) => {
       try {
         const fonts = await window.electron.ipcRenderer.invoke('get-system-fonts');
         setAvailableFonts(fonts);
-        const arialFont = fonts.find((font) => font.name.toLowerCase() === 'arial');
-        if (arialFont) {
-          setCaptionSettings((prev) => ({ ...prev, selectedFont: 'Arial' }));
-          updateAvailableWeights(arialFont);
-        } else if (fonts.length > 0) {
-          setCaptionSettings((prev) => ({ ...prev, selectedFont: fonts[0].name }));
-          updateAvailableWeights(fonts[0]);
-        }
       } catch (error) {
         console.error('Error fetching fonts:', error);
       }
@@ -1091,23 +1123,29 @@ const ProjectComponent = ({ projectId }) => {
     fetchFonts();
   }, []);
 
-  const updateAvailableWeights = useCallback((font) => {
-    const weights = font.weights.map((w) => ({ value: w.toString(), label: weightToLabel(w) }));
-    setAvailableWeights(weights);
-    const boldWeight = weights.find((w) => w.value === '700');
-    if (boldWeight) {
-      setCaptionSettings((prev) => ({ ...prev, selectedWeight: '700' }));
-    } else {
-      setCaptionSettings((prev) => ({ ...prev, selectedWeight: weights[0].value }));
+  // Keep the available-weights dropdown in sync with the currently selected
+  // font, but never mutate captionSettings.selectedWeight from here — that
+  // belongs to the user's choice (or the saved scene state).
+  useEffect(() => {
+    const font = availableFonts.find((f) => f.name === captionSettings.selectedFont);
+    if (font) {
+      setAvailableWeights(font.weights.map((w) => ({ value: w.toString(), label: weightToLabel(w) })));
     }
-  }, []);
+  }, [availableFonts, captionSettings.selectedFont]);
 
   const handleFontChange = useCallback((event) => {
     const newFont = event.target.value;
-    updateCaptionSettings({ selectedFont: newFont });
     const font = availableFonts.find((f) => f.name === newFont);
-    if (font) updateAvailableWeights(font);
-  }, [availableFonts, updateCaptionSettings, updateAvailableWeights]);
+    const next = { selectedFont: newFont };
+    // Only swap the weight if the current one isn't offered by the new font.
+    if (font) {
+      const weights = font.weights.map((w) => w.toString());
+      if (!weights.includes(String(captionSettings.selectedWeight))) {
+        next.selectedWeight = weights.includes('700') ? '700' : weights[0];
+      }
+    }
+    updateCaptionSettings(next);
+  }, [availableFonts, captionSettings.selectedWeight, updateCaptionSettings]);
 
   const handleWeightChange = useCallback((event) => {
     updateCaptionSettings({ selectedWeight: event.target.value });
@@ -1221,7 +1259,8 @@ const ProjectComponent = ({ projectId }) => {
   useEffect(() => {
     const checkExportability = async () => {
       if (isRemote) {
-        setCanExportClip(false);
+        const scene = projectData?.scenes?.[selectedScene - 1];
+        setCanExportClip(Boolean(scene?.thumbnail));
         return;
       }
       if (projectData && projectData.scenes[selectedScene - 1]) {
@@ -1236,31 +1275,88 @@ const ProjectComponent = ({ projectId }) => {
     checkExportability();
   }, [projectData, selectedScene, isRemote]);
 
+  const exportScenesAsMp4 = async (scenes, suggestedName) => {
+    const w = imgW || 1280;
+    const h = imgH || 720;
+    const pngs = [];
+    for (const s of scenes) {
+      // eslint-disable-next-line no-await-in-loop
+      const png = await composeSceneToPng(s, { width: w, height: h });
+      pngs.push(png);
+    }
+    return window.electron.ipcRenderer.invoke('export-project-mp4', {
+      pngDataUrls: pngs,
+      secondsPerFrame: SECONDS_PER_FRAME,
+      suggestedName,
+    });
+  };
+
   const handleExportClip = async () => {
-    if (isRemote) {
-      window.alert('Clip export uses local render files; not available for cloud-only projects yet.');
+    if (!isRemote) {
+      if (!canExportClip) return;
+      const scene = projectData.scenes[selectedScene - 1];
+      try {
+        const exportPath = await window.electron.ipcRenderer.invoke('export-clip', '', scene.thumbnail, selectedScene);
+        if (exportPath) console.log(`Clip exported successfully to: ${exportPath}`);
+      } catch (error) {
+        console.error('Failed to export clip:', error);
+      }
       return;
     }
-    if (!canExportClip) return;
+    if (!canExportClip || !projectData) return;
     const scene = projectData.scenes[selectedScene - 1];
-    const mp4Path = '';
-    const pngPath = scene.thumbnail;
+    if (!scene?.thumbnail) return;
+    // Use the live caption text the user just typed even if not yet saved.
+    const sceneWithLive = {
+      ...scene,
+      captionSettings: {
+        ...(scene.captionSettings || {}),
+        ...captionSettings,
+        caption: localCaption,
+      },
+    };
     try {
-      const exportPath = await window.electron.ipcRenderer.invoke('export-clip', mp4Path, pngPath, selectedScene);
-      if (exportPath) console.log(`Clip exported successfully to: ${exportPath}`);
-    } catch (error) {
-      console.error('Failed to export clip:', error);
+      const out = await exportScenesAsMp4([sceneWithLive], `Scene_${selectedScene}.mp4`);
+      if (out) console.log('Clip exported to', out);
+    } catch (e) {
+      console.error('Failed to export clip:', e);
+      window.alert(e.message || 'Export failed');
     }
   };
 
-  const handleExportProject = () => {
-    if (isRemote) {
-      window.alert('Full render uses local project folders; not available for cloud-only projects yet.');
+  const handleExportProject = async () => {
+    if (!isRemote) {
+      window.electron.ipcRenderer.invoke('render-project', '')
+        .then(() => console.log('Rendering completed and opened in Finder.'))
+        .catch((error) => console.error('Error rendering project:', error));
       return;
     }
-    window.electron.ipcRenderer.invoke('render-project', '')
-      .then(() => console.log('Rendering completed and opened in Finder.'))
-      .catch((error) => console.error('Error rendering project:', error));
+    if (!projectData?.scenes?.length) return;
+    const scenes = projectData.scenes
+      .map((s, i) =>
+        i === selectedScene - 1
+          ? {
+              ...s,
+              captionSettings: {
+                ...(s.captionSettings || {}),
+                ...captionSettings,
+                caption: localCaption,
+              },
+            }
+          : s,
+      )
+      .filter((s) => s.thumbnail);
+    if (scenes.length === 0) {
+      window.alert('Generate a visual on at least one scene before exporting.');
+      return;
+    }
+    try {
+      const out = await exportScenesAsMp4(scenes, `${projectData.name || 'project'}.mp4`);
+      if (out) console.log('Project exported to', out);
+    } catch (e) {
+      console.error('Failed to export project:', e);
+      window.alert(e.message || 'Export failed');
+    }
   };
 
   // ---------- Thumbnail freshness polling (local files only) ----------
@@ -1371,7 +1467,7 @@ const ProjectComponent = ({ projectId }) => {
         onGenerate: () => startGenerationForScene(selectedScene),
       }}
       centerStageProps={{
-        aspectRatio,
+        aspectRatio: projectAspectRatio,
         scenePreviewProps: {
           thumbnail,
           videoKey,
@@ -1392,6 +1488,8 @@ const ProjectComponent = ({ projectId }) => {
           referencesUploading,
           selected: imageSelected,
           onSelectImage: () => setImageSelected(true),
+          caption: localCaption,
+          captionSettings,
         },
         voiceLineProps: {
           voiceText,
@@ -1436,7 +1534,7 @@ const ProjectComponent = ({ projectId }) => {
         currentlyLoading,
         thumbnail,
         thumbnailTimestamps,
-        aspectRatio,
+        aspectRatio: projectAspectRatio,
         canExportClip,
         sceneRefs,
         onSceneMouseDown: (sceneNumber) => {

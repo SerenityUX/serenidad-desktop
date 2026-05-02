@@ -137,7 +137,7 @@ const ScenesStrip = ({
               onMouseDown={() => onSceneMouseDown(sceneNumber)}
               onMouseUp={() => onSceneMouseUp(sceneNumber)}
               onMouseLeave={onSceneMouseLeave}
-              onDelete={() => onDeleteScene(index)}
+              onDelete={(skipConfirm) => onDeleteScene(index, skipConfirm)}
               onOpenFolder={() => onOpenFolder(sceneNumber)}
             />
           </React.Fragment>

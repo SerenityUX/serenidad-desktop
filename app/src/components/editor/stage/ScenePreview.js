@@ -2,26 +2,75 @@ import React from 'react';
 import { Img } from 'react-image';
 import ScenePlaceholder from './ScenePlaceholder';
 
-const mediaStyle = (aspectRatio) => ({
-  aspectRatio,
-  maxWidth: '100%',
+const fillStyle = {
+  width: '100%',
   height: '100%',
-  borderRadius: '16px',
+  borderRadius: 16,
   overflow: 'hidden',
-  objectFit: 'contain',
-  display: 'flex',
-});
+  display: 'block',
+  objectFit: 'cover',
+};
 
 const selectionWrapStyle = (selected) => ({
-  display: 'inline-flex',
+  display: 'flex',
+  width: '100%',
+  height: '100%',
   borderRadius: 18,
   padding: 2,
+  boxSizing: 'border-box',
   outline: selected ? '3px solid #007AFF' : '3px solid transparent',
   outlineOffset: 0,
   boxShadow: selected ? '0 0 0 1px #fff inset' : 'none',
   transition: 'outline-color 80ms linear',
   cursor: 'pointer',
+  position: 'relative',
 });
+
+/**
+ * Caption overlay. The same captionSettings drives the editor preview and the
+ * mp4 export (see lib/composeScene.js), so what you see is what you get.
+ */
+const CaptionOverlay = ({ caption, captionSettings }) => {
+  const text = (caption || '').trim();
+  if (!text) return null;
+  const cs = captionSettings || {};
+  const strokeSize = Number(cs.strokeSize || 0);
+  const strokeColor = cs.strokeColor || '#000';
+  // Mimic the canvas stroke by stacking text-shadow offsets.
+  const shadow = strokeSize > 0
+    ? [
+        `${strokeSize}px ${strokeSize}px 0 ${strokeColor}`,
+        `-${strokeSize}px ${strokeSize}px 0 ${strokeColor}`,
+        `${strokeSize}px -${strokeSize}px 0 ${strokeColor}`,
+        `-${strokeSize}px -${strokeSize}px 0 ${strokeColor}`,
+        `0 ${strokeSize}px 0 ${strokeColor}`,
+        `0 -${strokeSize}px 0 ${strokeColor}`,
+        `${strokeSize}px 0 0 ${strokeColor}`,
+        `-${strokeSize}px 0 0 ${strokeColor}`,
+      ].join(', ')
+    : 'none';
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: '5%',
+        right: '5%',
+        bottom: '6%',
+        textAlign: 'center',
+        pointerEvents: 'none',
+        fontFamily: `"${cs.selectedFont || 'Arial'}", Arial, sans-serif`,
+        fontWeight: cs.selectedWeight || '700',
+        fontSize: `${cs.fontSize || 16}px`,
+        color: cs.captionColor || '#FFE600',
+        textShadow: shadow,
+        whiteSpace: 'pre-wrap',
+        lineHeight: 1.2,
+      }}
+    >
+      {text}
+    </div>
+  );
+};
 
 const ScenePreview = ({
   thumbnail,
@@ -41,6 +90,8 @@ const ScenePreview = ({
   referencesUploading,
   selected,
   onSelectImage,
+  caption,
+  captionSettings,
 }) => {
   const mediaSrc =
     thumbnail != null && String(thumbnail).trim() !== ''
@@ -55,7 +106,13 @@ const ScenePreview = ({
     if (mediaSrc.endsWith('.mp4')) {
       return (
         <div style={selectionWrapStyle(selected)} onClick={handleClick}>
-          <video key={videoKey} src={mediaSrc} controls style={mediaStyle(aspectRatio)} />
+          <video
+            key={videoKey}
+            src={mediaSrc}
+            controls
+            style={{ ...fillStyle, backgroundColor: '#F2F2F2' }}
+          />
+          <CaptionOverlay caption={caption} captionSettings={captionSettings} />
         </div>
       );
     }
@@ -64,24 +121,11 @@ const ScenePreview = ({
         <Img
           src={mediaSrc}
           alt=""
-          loader={
-            <div
-              style={{
-                ...mediaStyle(aspectRatio),
-                backgroundColor: '#F2F2F2',
-              }}
-            />
-          }
-          unloader={
-            <div
-              style={{
-                ...mediaStyle(aspectRatio),
-                backgroundColor: '#F2F2F2',
-              }}
-            />
-          }
-          style={{ ...mediaStyle(aspectRatio), objectFit: 'cover', backgroundColor: '#F2F2F2' }}
+          loader={<div style={{ ...fillStyle, backgroundColor: '#F2F2F2' }} />}
+          unloader={<div style={{ ...fillStyle, backgroundColor: '#F2F2F2' }} />}
+          style={{ ...fillStyle, backgroundColor: '#F2F2F2' }}
         />
+        <CaptionOverlay caption={caption} captionSettings={captionSettings} />
       </div>
     );
   }

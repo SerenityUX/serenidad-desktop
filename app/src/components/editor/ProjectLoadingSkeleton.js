@@ -1,4 +1,5 @@
 import React from 'react';
+import TitleBar from './TitleBar';
 
 const ProjectLoadingSkeleton = () => (
   <div
@@ -10,13 +11,11 @@ const ProjectLoadingSkeleton = () => (
       background: '#FFFFFF',
     }}
   >
-    <div style={{ height: 45, borderBottom: '1px solid #EFEFEF' }} />
+    <TitleBar showExport={false} showShare={false} />
 
     <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
       <div style={{ width: 274, background: '#FAFAFA' }} />
-
       <div style={{ flex: 1, background: '#F2F2F2' }} />
-
       <div style={{ width: 274, background: '#FAFAFA' }} />
     </div>
 

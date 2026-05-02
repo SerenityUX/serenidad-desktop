@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import AuthScreen from "./components/auth/AuthScreen";
 import FolderView from "./components/projects/FolderView";
+import LauncherLoadingSkeleton from "./components/projects/LauncherLoadingSkeleton";
 import { apiUrl } from "./config";
 
 const MainApp = () => {
@@ -97,7 +98,7 @@ const AppGate = () => {
   const { ready, user } = useAuth();
 
   if (!ready) {
-    return <div>Loading…</div>;
+    return <LauncherLoadingSkeleton />;
   }
 
   if (!user) {

@@ -1,13 +1,13 @@
 const { Resend } = require("resend");
 
+const FROM_EMAIL = "Serenidad <noreply@serenidad.app>";
+
 function getResend() {
   const apiKey = process.env.RESEND_API_TOKEN;
   if (!apiKey) {
     throw new Error("RESEND_API_TOKEN is not set");
   }
-  const from =
-    process.env.RESEND_FROM_EMAIL || "Serenidad <onboarding@resend.dev>";
-  return { resend: new Resend(apiKey), from };
+  return { resend: new Resend(apiKey), from: FROM_EMAIL };
 }
 
 async function sendOtpEmail(to, code) {
