@@ -95,6 +95,7 @@ const FAL_VIDEO_MODELS = [
     costCents: 50,
     family: "happy-horse",
     defaultDuration: 4,
+    supportsReferences: true,
   },
   {
     id: "fal-ai/bytedance/seedance/v1/pro/image-to-video",
@@ -102,6 +103,7 @@ const FAL_VIDEO_MODELS = [
     costCents: 60,
     family: "seedance",
     defaultDuration: 5,
+    supportsReferences: true,
   },
   {
     id: "fal-ai/bytedance/seedance/v1/lite/image-to-video",
@@ -109,6 +111,7 @@ const FAL_VIDEO_MODELS = [
     costCents: 30,
     family: "seedance",
     defaultDuration: 5,
+    supportsReferences: true,
   },
   {
     id: "fal-ai/kling-video/v2/master/image-to-video",
@@ -116,6 +119,7 @@ const FAL_VIDEO_MODELS = [
     costCents: 90,
     family: "kling",
     defaultDuration: 5,
+    supportsReferences: true,
   },
   {
     id: "fal-ai/minimax/hailuo-02/standard/image-to-video",
@@ -123,6 +127,7 @@ const FAL_VIDEO_MODELS = [
     costCents: 45,
     family: "minimax",
     defaultDuration: 6,
+    supportsReferences: true,
   },
   {
     id: "fal-ai/wan/v2.2-a14b/image-to-video",
@@ -130,6 +135,7 @@ const FAL_VIDEO_MODELS = [
     costCents: 40,
     family: "wan",
     defaultDuration: 5,
+    supportsReferences: true,
   },
   {
     id: "fal-ai/luma-dream-machine/ray-2/image-to-video",
@@ -137,6 +143,7 @@ const FAL_VIDEO_MODELS = [
     costCents: 70,
     family: "luma",
     defaultDuration: 5,
+    supportsReferences: true,
   },
 ];
 

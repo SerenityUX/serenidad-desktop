@@ -89,6 +89,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
         label: m.label,
         costCents: m.costCents,
         defaultDuration: m.defaultDuration,
+        supportsReferences: m.supportsReferences !== false,
       })),
       defaultVideoId: DEFAULT_VIDEO_MODEL_ID,
     });

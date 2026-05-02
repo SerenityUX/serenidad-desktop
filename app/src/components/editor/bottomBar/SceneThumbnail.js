@@ -1,6 +1,10 @@
 import React, { useRef } from 'react';
 import { Img } from 'react-image';
 
+// iOS dark-mode system blue / accent pink for video frames.
+const IOS_BLUE = '#0A84FF';
+const VIDEO_PINK = '#FF7AB6';
+
 const SceneThumbnail = ({
   scene,
   index,
@@ -33,6 +37,33 @@ const SceneThumbnail = ({
     if (typeof innerRef === 'function') innerRef(el);
   };
   const pressed = (isPressed && isMouseDown) || (isSelected && isPressed);
+
+  // Pick the selection color: video frames pink, multi-select / primary blue.
+  // Outline goes on the *image-shaped* wrapper so it follows aspect ratio and
+  // border-radius, just like Finder's file selection.
+  const ringColor =
+    (isSelected && isVideoFrame) || (isMultiSelected && isVideoFrame)
+      ? VIDEO_PINK
+      : IOS_BLUE;
+  const showRing = isMultiSelected || (isSelected && isVideoFrame);
+
+  const shapeStyle = {
+    position: 'relative',
+    aspectRatio,
+    borderRadius: '12px',
+    maxHeight: '100%',
+    width: '100%',
+    backgroundColor: '#F2F2F2',
+    overflow: 'hidden',
+    transition: 'opacity 0.12s ease-out, transform 0.1s ease-out, box-shadow 0.15s ease-out',
+    opacity: pressed ? 0.7 : 1,
+    transform: `scale(${pressed ? 0.95 : 1})`,
+    // Outline-style ring that respects the rounded shape and aspect ratio.
+    boxShadow: showRing
+      ? `0 0 0 2px #1C1C1E, 0 0 0 5px ${ringColor}`
+      : 'none',
+  };
+
   return (
     <div
       ref={setRefs}
@@ -52,26 +83,13 @@ const SceneThumbnail = ({
         position: 'relative',
         cursor: isDragging ? 'grabbing' : 'pointer',
         opacity: isDeleting ? 0 : isDragging ? 0.4 : (isSelected || isMultiSelected ? 1 : 0.3),
-        transform: `scale(${pressed ? 0.9 : 1})`,
         transition:
-          'opacity 0.25s ease-out, transform 0.1s ease-out, width 0.3s ease-out, height 0.3s ease-out, margin 0.3s ease-out, padding 0.3s ease-out',
+          'opacity 0.25s ease-out, width 0.3s ease-out, height 0.3s ease-out, margin 0.3s ease-out, padding 0.3s ease-out',
       }}
       onMouseDown={onMouseDown}
       onMouseUp={(e) => onMouseUp?.(e)}
       onMouseLeave={onMouseLeave}
     >
-      {(isMultiSelected || (isSelected && isVideoFrame)) && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 18,
-            borderRadius: 16,
-            border: `3px solid ${isVideoFrame ? '#FF7AB6' : '#1F93FF'}`,
-            pointerEvents: 'none',
-            zIndex: 5,
-          }}
-        />
-      )}
       {showActionIcons && (
         <>
           <button
@@ -136,55 +154,35 @@ const SceneThumbnail = ({
           )}
         </>
       )}
-      {scene.thumbnail != null && String(scene.thumbnail).trim() !== '' ? (
-        <Img
-          src={`${String(scene.thumbnail).trim()}?t=${thumbnailTimestamp || ''}`}
-          loader={
-            <div style={{
-              aspectRatio,
-              borderRadius: '12px',
-              maxHeight: '100%',
+      <div style={shapeStyle}>
+        {scene.thumbnail != null && String(scene.thumbnail).trim() !== '' ? (
+          <Img
+            src={`${String(scene.thumbnail).trim()}?t=${thumbnailTimestamp || ''}`}
+            loader={
+              <div style={{
+                width: '100%',
+                height: '100%',
+                backgroundColor: '#F2F2F2',
+              }} />
+            }
+            unloader={
+              <div style={{
+                width: '100%',
+                height: '100%',
+                backgroundColor: '#F2F2F2',
+              }} />
+            }
+            style={{
               width: '100%',
+              height: '100%',
+              display: 'block',
+              objectFit: 'cover',
               backgroundColor: '#F2F2F2',
-            }} />
-          }
-          unloader={
-            <div style={{
-              aspectRatio,
-              borderRadius: '12px',
-              maxHeight: '100%',
-              transition: 'opacity 0.1s ease-out, width 0.3s ease-out, transform 0.1s ease-out',
-              width: '100%',
-              backgroundColor: '#F2F2F2',
-            }} />
-          }
-          style={{
-            aspectRatio,
-            borderRadius: '12px',
-            maxHeight: '100%',
-            display: 'flex',
-            backgroundColor: '#F2F2F2',
-            objectFit: 'cover',
-            transition: 'opacity 0.1s ease-out, width 0.3s ease-out, transform 0.1s ease-out',
-            opacity: pressed ? 0.7 : 1,
-            transform: `scale(${pressed ? 0.95 : 1})`,
-            pointerEvents: 'none',
-          }}
-        />
-      ) : (
-        <div
-          style={{
-            aspectRatio,
-            borderRadius: '12px',
-            maxHeight: '100%',
-            width: '100%',
-            backgroundColor: '#F2F2F2',
-            transition: 'opacity 0.1s ease-out, width 0.3s ease-out, transform 0.1s ease-out',
-            opacity: pressed ? 0.7 : 1,
-            transform: `scale(${pressed ? 0.95 : 1})`,
-          }}
-        />
-      )}
+              pointerEvents: 'none',
+            }}
+          />
+        ) : null}
+      </div>
     </div>
   );
 };

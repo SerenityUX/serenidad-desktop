@@ -5,23 +5,23 @@ function getFalCredentials() {
   return process.env.FAL_API_KEY || process.env.FAL_KEY || "";
 }
 
-function buildVideoInput(model, { prompt, durationSeconds, referenceUrls, width, height }) {
+function buildVideoInput(model, { prompt, durationSeconds, referenceUrls }) {
   const refs = Array.isArray(referenceUrls) ? referenceUrls.filter(Boolean) : [];
   const duration = Math.max(1, Math.min(30, Number(durationSeconds) || 4));
-  // Pass both single- and dual-image keys; fal models tolerate extras and pick
-  // what they need. "image_url" + "end_image_url" is the common shape for
-  // image-to-video models that support a target end-frame.
-  const input = {
-    prompt,
-    duration,
-  };
+  // fal video models tolerate unknown keys, so we send all common spellings
+  // for "start" and "end" frames — different families pick different ones:
+  //   image_url + end_image_url   → Luma, Seedance, Happy Horse
+  //   image_url + tail_image_url  → Kling
+  //   image_url + last_image_url  → Wan
+  const input = { prompt, duration };
   if (refs[0]) input.image_url = refs[0];
-  if (refs[1]) input.end_image_url = refs[1];
-  if (refs.length > 0) input.image_urls = refs;
-  if (Number(width) > 0 && Number(height) > 0) {
-    input.resolution = `${width}x${height}`;
-    input.image_size = { width: Number(width), height: Number(height) };
+  if (refs[1]) {
+    input.end_image_url = refs[1];
+    input.tail_image_url = refs[1];
+    input.image_tail_url = refs[1];
+    input.last_image_url = refs[1];
   }
+  if (refs.length > 0) input.image_urls = refs;
   return input;
 }
 
@@ -45,8 +45,6 @@ async function generateFalVideo(opts) {
     prompt,
     durationSeconds: opts.durationSeconds,
     referenceUrls: opts.referenceUrls,
-    width: opts.width,
-    height: opts.height,
   });
 
   const result = await fal.subscribe(model.id, { input, logs: false });
