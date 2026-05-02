@@ -6,6 +6,8 @@ const SceneThumbnail = ({
   index,
   innerRef,
   isSelected,
+  isMultiSelected,
+  isVideoFrame,
   isPressed,
   isMouseDown,
   isDeleting,
@@ -49,15 +51,27 @@ const SceneThumbnail = ({
         marginRight: '0px',
         position: 'relative',
         cursor: isDragging ? 'grabbing' : 'pointer',
-        opacity: isDeleting ? 0 : isDragging ? 0.4 : (isSelected ? 1 : 0.3),
+        opacity: isDeleting ? 0 : isDragging ? 0.4 : (isSelected || isMultiSelected ? 1 : 0.3),
         transform: `scale(${pressed ? 0.9 : 1})`,
         transition:
           'opacity 0.25s ease-out, transform 0.1s ease-out, width 0.3s ease-out, height 0.3s ease-out, margin 0.3s ease-out, padding 0.3s ease-out',
       }}
       onMouseDown={onMouseDown}
-      onMouseUp={onMouseUp}
+      onMouseUp={(e) => onMouseUp?.(e)}
       onMouseLeave={onMouseLeave}
     >
+      {(isMultiSelected || (isSelected && isVideoFrame)) && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 18,
+            borderRadius: 16,
+            border: `3px solid ${isVideoFrame ? '#FF7AB6' : '#1F93FF'}`,
+            pointerEvents: 'none',
+            zIndex: 5,
+          }}
+        />
+      )}
       {showActionIcons && (
         <>
           <button

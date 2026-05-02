@@ -97,6 +97,7 @@ const ScenePlaceholder = ({
   onAddReferenceUrl,
   onRemoveReference,
   referencesUploading,
+  generateLabel,
 }) => {
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef(null);
@@ -253,7 +254,7 @@ const ScenePlaceholder = ({
               borderRadius: '6px',
             }}
           >
-            Generate Visuals
+            {generateLabel || 'Generate Visuals'}
           </button>
         </div>
       ) : (

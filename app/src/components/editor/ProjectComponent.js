@@ -40,6 +40,8 @@ function remoteDetailToProjectData(projectRow, frames) {
         speaker: meta.speaker || 'Narrator',
         baseModel: meta.baseModel || '',
         selectedLora: meta.selectedLora || '',
+        kind: meta.kind === 'video' ? 'video' : 'image',
+        durationSeconds: Number(meta.durationSeconds) || null,
         captionSettings: {
           ...REMOTE_CAPTION_DEFAULT,
           ...(meta.captionSettings || {}),
@@ -114,6 +116,15 @@ const ProjectComponent = ({ projectId }) => {
   const [falModels, setFalModels] = useState([]);
   const [defaultFalModelId, setDefaultFalModelId] = useState('fal-ai/nano-banana-2');
   const [selectedFalModel, setSelectedFalModel] = useState('fal-ai/nano-banana-2');
+  const [falVideoModels, setFalVideoModels] = useState([]);
+  const [defaultFalVideoModelId, setDefaultFalVideoModelId] = useState('fal-ai/happy-horse/image-to-video');
+
+  // Multi-select for "Make Video Frame"
+  const [secondarySelectedScene, setSecondarySelectedScene] = useState(null);
+
+  // Video frame state (per-scene fields, hydrated when selectedScene changes)
+  const [videoDuration, setVideoDuration] = useState(4);
+  const [creatingVideo, setCreatingVideo] = useState(false);
 
   // References
   const [references, setReferences] = useState([]);
@@ -688,6 +699,148 @@ const ProjectComponent = ({ projectId }) => {
     }
   };
 
+  /**
+   * Caption that flows over to a video frame from its two source frames:
+   * - if both have the same caption → that one
+   * - if only one has a caption → that one
+   * - if both differ → first on line 1, second on line 2
+   */
+  const mergeCaptions = (a, b) => {
+    const ca = (a?.captionSettings?.caption || '').trim();
+    const cb = (b?.captionSettings?.caption || '').trim();
+    if (ca && cb) return ca === cb ? ca : `${ca}\n${cb}`;
+    return ca || cb || '';
+  };
+
+  const makeVideoFrame = async () => {
+    if (!isRemote || !authToken || !projectId || !projectData) return;
+    if (!secondarySelectedScene) return;
+    const aIdx = Math.min(selectedScene, secondarySelectedScene) - 1;
+    const bIdx = Math.max(selectedScene, secondarySelectedScene) - 1;
+    const a = projectData.scenes[aIdx];
+    const b = projectData.scenes[bIdx];
+    if (!a?.thumbnail || !b?.thumbnail) {
+      window.alert('Both selected frames need a generated visual first.');
+      return;
+    }
+    try {
+      const addRes = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/frames`),
+        { method: 'POST', headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' } },
+      );
+      const addBody = await addRes.json().catch(() => ({}));
+      if (!addRes.ok) throw new Error(addBody.error || 'Add frame failed');
+      const newFrameId = addBody.frame?.id;
+      if (!newFrameId) throw new Error('Server did not return a frame id');
+
+      const mergedCaption = mergeCaptions(a, b);
+      const sourceCaptionSettings =
+        a.captionSettings || b.captionSettings || REMOTE_CAPTION_DEFAULT;
+      const captionForFrame = { ...sourceCaptionSettings, caption: mergedCaption };
+
+      await patchFrame(newFrameId, {
+        model: defaultFalVideoModelId,
+        reference_urls: [a.thumbnail, b.thumbnail],
+        meta: {
+          kind: 'video',
+          durationSeconds: 4,
+          captionSettings: captionForFrame,
+        },
+      });
+
+      const currentIds = projectData.scenes.map((s) => s.frameId);
+      const newOrder = currentIds.slice();
+      const insertAt = bIdx + 1;
+      newOrder.splice(insertAt, 0, newFrameId);
+
+      // Optimistic local update.
+      setProjectData((prev) => {
+        if (!prev) return prev;
+        const placeholder = {
+          frameId: newFrameId,
+          id: newFrameId,
+          thumbnail: '',
+          positivePrompt: '',
+          references: [a.thumbnail, b.thumbnail],
+          model: defaultFalVideoModelId,
+          voiceline: '',
+          speaker: 'Narrator',
+          baseModel: '',
+          selectedLora: '',
+          kind: 'video',
+          durationSeconds: 4,
+          captionSettings: captionForFrame,
+        };
+        const nextScenes = prev.scenes.slice();
+        nextScenes.splice(insertAt, 0, placeholder);
+        return { ...prev, scenes: nextScenes };
+      });
+
+      try {
+        await reorderFrames(newOrder);
+      } catch (e) {
+        console.error('Reorder after make-video failed:', e);
+      }
+
+      setSecondarySelectedScene(null);
+      setSelectedScene(insertAt + 1);
+      refetchRemoteProject().catch(() => {});
+    } catch (e) {
+      console.error(e);
+      window.alert(e.message || 'Could not create video frame');
+    }
+  };
+
+  const generateVideoForCurrentFrame = async () => {
+    if (!isRemote || !authToken || !projectId || !projectData) return;
+    const scene = projectData.scenes[selectedScene - 1];
+    if (!scene?.frameId) return;
+    const promptText = String(prompt || '').trim();
+    if (!promptText) {
+      window.alert('Enter a video prompt first.');
+      return;
+    }
+    setCreatingVideo(true);
+    try {
+      const res = await fetch(
+        apiUrl(
+          `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(scene.frameId)}/generate-video`,
+        ),
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            prompt: promptText,
+            model: selectedFalModel || defaultFalVideoModelId,
+            durationSeconds: videoDuration,
+          }),
+        },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const required = body.required ?? body.tokenCost;
+        const msg =
+          body.error ||
+          (res.status === 402
+            ? `Not enough tokens (need ${required ?? '?'}; you have ${body.tokens ?? '?'})`
+            : `Video generation failed (${res.status})`);
+        throw new Error(msg);
+      }
+      const pd = await refetchRemoteProject();
+      const url = body.frame?.result || pd?.scenes?.[selectedScene - 1]?.thumbnail;
+      if (url) await loadThumbnail(url);
+    } catch (e) {
+      console.error(e);
+      window.alert(e.message || 'Video generation failed');
+    } finally {
+      setCreatingVideo(false);
+    }
+  };
+
   const addNewScene = () => {
     if (!authToken || !projectId) return;
     fetch(apiUrl(`/projects/${encodeURIComponent(projectId)}/frames`), {
@@ -768,6 +921,10 @@ const ProjectComponent = ({ projectId }) => {
           setFalModels(body.models);
           if (body.defaultId) setDefaultFalModelId(body.defaultId);
         }
+        if (Array.isArray(body.videoModels)) {
+          setFalVideoModels(body.videoModels);
+          if (body.defaultVideoId) setDefaultFalVideoModelId(body.defaultVideoId);
+        }
       } catch (e) {
         console.error('Failed to load fal models:', e);
       }
@@ -804,6 +961,7 @@ const ProjectComponent = ({ projectId }) => {
         }));
 
         setLocalCaption(currentScene.captionSettings?.caption || '');
+        setVideoDuration(Number(currentScene.durationSeconds) || 4);
         setIsTransitioning(false);
       }, 50);
     }
@@ -1433,6 +1591,25 @@ const ProjectComponent = ({ projectId }) => {
     currentlyLoading.includes(selectedScene) ||
     (!isRemote && baseModels.length === 0 && loraModules.length === 0);
 
+  const currentScene = projectData?.scenes?.[selectedScene - 1];
+  const isVideoFrame = currentScene?.kind === 'video';
+
+  const handleVideoDurationChange = (event) => {
+    const v = Math.max(1, Math.min(30, parseInt(event.target.value, 10) || 1));
+    setVideoDuration(v);
+    if (currentScene?.frameId) {
+      patchFrame(currentScene.frameId, { meta: { durationSeconds: v } }).catch((e) =>
+        console.error('Failed to update video duration:', e),
+      );
+      setProjectData((prev) => ({
+        ...prev,
+        scenes: prev.scenes.map((s, i) =>
+          i === selectedScene - 1 ? { ...s, durationSeconds: v } : s,
+        ),
+      }));
+    }
+  };
+
   return (
     <>
     <EditorLayout
@@ -1448,39 +1625,53 @@ const ProjectComponent = ({ projectId }) => {
         loraModules,
         onLoraChange: handleLoraChange,
         onLoraOpen: fetchLoraModules,
-        falModels,
+        falModels: isVideoFrame ? falVideoModels : falModels,
         selectedFalModel,
         onFalModelChange: handleFalModelChange,
         prompt,
         onPromptChange: handlePromptChange,
+        promptLabel: isVideoFrame ? 'VIDEO PROMPT' : undefined,
         isTransitioning,
         references,
         onAddReferenceFiles: handleAddReferenceFiles,
         onAddReferenceUrl: handleAddReferenceUrl,
         onRemoveReference: handleRemoveReference,
         referencesUploading,
-        modelSupportsReferences:
-          falModels.find((m) => m.id === selectedFalModel)?.supportsReferences ?? true,
+        modelSupportsReferences: isVideoFrame
+          ? true
+          : (falModels.find((m) => m.id === selectedFalModel)?.supportsReferences ?? true),
         sceneDuration,
-        generateLabel: generateImageText[selectedScene] || 'Generate Visuals',
-        generateDisabled,
-        onGenerate: () => startGenerationForScene(selectedScene),
+        videoMode: isVideoFrame,
+        videoDuration,
+        onVideoDurationChange: handleVideoDurationChange,
+        generateLabel: isVideoFrame
+          ? (creatingVideo ? 'Creating Video…' : 'Create Video')
+          : (generateImageText[selectedScene] || 'Generate Visuals'),
+        generateDisabled: isVideoFrame
+          ? (creatingVideo || prompt.trim() === '' || !currentScene?.references?.length)
+          : generateDisabled,
+        onGenerate: isVideoFrame
+          ? () => generateVideoForCurrentFrame()
+          : () => startGenerationForScene(selectedScene),
       }}
       centerStageProps={{
         aspectRatio: projectAspectRatio,
         scenePreviewProps: {
           thumbnail,
           videoKey,
-          isLoading: currentlyLoading.includes(selectedScene),
+          isLoading: currentlyLoading.includes(selectedScene) || creatingVideo,
           progress: progressMap[selectedScene],
           fact: currentFact,
           prompt,
           onPromptChange: handlePromptChange,
-          generateDisabled:
-            prompt.trim() === '' ||
-            currentlyLoading.includes(selectedScene) ||
-            (!isRemote && baseModels.length === 0 && loraModules.length === 0),
-          onGenerate: () => startGenerationForScene(selectedScene),
+          generateDisabled: isVideoFrame
+            ? (creatingVideo || prompt.trim() === '' || !currentScene?.references?.length)
+            : (prompt.trim() === '' ||
+               currentlyLoading.includes(selectedScene) ||
+               (!isRemote && baseModels.length === 0 && loraModules.length === 0)),
+          onGenerate: isVideoFrame
+            ? () => generateVideoForCurrentFrame()
+            : () => startGenerationForScene(selectedScene),
           references,
           onAddReferenceFiles: handleAddReferenceFiles,
           onAddReferenceUrl: handleAddReferenceUrl,
@@ -1490,6 +1681,7 @@ const ProjectComponent = ({ projectId }) => {
           onSelectImage: () => setImageSelected(true),
           caption: localCaption,
           captionSettings,
+          isVideoFrame,
         },
         voiceLineProps: {
           voiceText,
@@ -1541,11 +1733,20 @@ const ProjectComponent = ({ projectId }) => {
           setPressedScene(sceneNumber);
           setIsMouseDown(true);
         },
-        onSceneMouseUp: (sceneNumber) => {
+        onSceneMouseUp: (sceneNumber, event) => {
           setIsMouseDown(false);
-          if (pressedScene === sceneNumber) setSelectedScene(sceneNumber);
+          if (pressedScene === sceneNumber) {
+            if (event?.shiftKey && sceneNumber !== selectedScene) {
+              setSecondarySelectedScene(sceneNumber);
+            } else {
+              setSelectedScene(sceneNumber);
+              setSecondarySelectedScene(null);
+            }
+          }
           setPressedScene(null);
         },
+        secondarySelectedScene,
+        onMakeVideoFrame: makeVideoFrame,
         onSceneMouseLeave: () => {
           if (isMouseDown) {
             setIsMouseDown(false);

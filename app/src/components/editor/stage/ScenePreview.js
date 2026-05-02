@@ -92,18 +92,25 @@ const ScenePreview = ({
   onSelectImage,
   caption,
   captionSettings,
+  isVideoFrame,
 }) => {
   const mediaSrc =
     thumbnail != null && String(thumbnail).trim() !== ''
       ? String(thumbnail).trim()
       : '';
 
+  // Detect video by frame kind first (fal URLs may have query strings or odd
+  // extensions); fall back to URL sniffing for legacy local mp4s.
+  const looksLikeVideo =
+    isVideoFrame ||
+    /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(mediaSrc);
+
   if (mediaSrc) {
     const handleClick = (e) => {
       e.stopPropagation();
       onSelectImage?.(true);
     };
-    if (mediaSrc.endsWith('.mp4')) {
+    if (looksLikeVideo) {
       return (
         <div style={selectionWrapStyle(selected)} onClick={handleClick}>
           <video
@@ -145,6 +152,7 @@ const ScenePreview = ({
       onAddReferenceUrl={onAddReferenceUrl}
       onRemoveReference={onRemoveReference}
       referencesUploading={referencesUploading}
+      generateLabel={isVideoFrame ? 'Create Video' : undefined}
     />
   );
 };

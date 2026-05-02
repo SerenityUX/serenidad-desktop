@@ -3,10 +3,14 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { isProbablyAssetUrl } = require("../lib/assetUrl");
 const { generateFalImage } = require("../lib/falImage");
+const { generateFalVideo } = require("../lib/falVideo");
 const {
   FAL_IMAGE_MODELS,
+  FAL_VIDEO_MODELS,
   DEFAULT_MODEL_ID,
+  DEFAULT_VIDEO_MODEL_ID,
   resolveModelOrDefault,
+  resolveVideoModelOrDefault,
 } = require("../lib/falModels");
 const { putProfileImage } = require("../lib/s3Upload");
 const {
@@ -80,6 +84,13 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
         supportsReferences: m.supportsReferences,
       })),
       defaultId: DEFAULT_MODEL_ID,
+      videoModels: FAL_VIDEO_MODELS.map((m) => ({
+        id: m.id,
+        label: m.label,
+        costCents: m.costCents,
+        defaultDuration: m.defaultDuration,
+      })),
+      defaultVideoId: DEFAULT_VIDEO_MODEL_ID,
     });
   });
 
@@ -543,6 +554,164 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       frame: savedFrameRow,
       tokens: tokRow.rows[0]?.tokens ?? 0,
       projectThumbnail: imageUrl,
+      tokenCost,
+      model: { id: model.id, label: model.label, costCents: model.costCents },
+    });
+  });
+
+  router.post("/:projectId/frames/:frameId/generate-video", async (req, res) => {
+    const { projectId, frameId } = req.params;
+    if (!isUuid(projectId) || !isUuid(frameId)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    if (!proj) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const prompt = String(req.body?.prompt || "").trim();
+    if (!prompt) {
+      return res.status(400).json({ error: "prompt is required" });
+    }
+    const durationSeconds = Math.max(
+      1,
+      Math.min(30, Number(req.body?.durationSeconds) || 4),
+    );
+
+    const frameCheck = await pool.query(
+      `SELECT id, model, reference_urls, meta FROM frames WHERE id = $1 AND project_id = $2`,
+      [frameId, projectId],
+    );
+    if (frameCheck.rows.length === 0) {
+      return res.status(404).json({ error: "Frame not found" });
+    }
+    const frameRow = frameCheck.rows[0];
+
+    const requestedModelId =
+      String(req.body?.model || "").trim() ||
+      frameRow.model ||
+      DEFAULT_VIDEO_MODEL_ID;
+    const model = resolveVideoModelOrDefault(requestedModelId);
+    if (!model) {
+      return res.status(400).json({ error: "Unknown video model id" });
+    }
+
+    const referenceUrls = Array.isArray(frameRow.reference_urls)
+      ? frameRow.reference_urls
+      : [];
+    if (referenceUrls.length < 1) {
+      return res
+        .status(400)
+        .json({ error: "Video frames need at least one reference image" });
+    }
+
+    const tokenCost = Math.max(1, Math.ceil(model.costCents));
+    const debitClient = await pool.connect();
+    try {
+      await debitClient.query("BEGIN");
+      const bal = await debitClient.query(
+        `SELECT tokens FROM users WHERE id = $1 FOR UPDATE`,
+        [req.user.id],
+      );
+      const current = bal.rows[0]?.tokens ?? 0;
+      if (current < tokenCost) {
+        await debitClient.query("ROLLBACK");
+        return res
+          .status(402)
+          .json({ error: "Insufficient tokens", tokens: current, required: tokenCost });
+      }
+      await debitClient.query(
+        `INSERT INTO transactions (user_id, delta, name, notes)
+         VALUES ($1, $2, $3, $4)`,
+        [req.user.id, -tokenCost, "Video generation", `${model.id} frame ${frameId}`],
+      );
+      await debitClient.query("COMMIT");
+    } catch (e) {
+      await debitClient.query("ROLLBACK").catch(() => {});
+      debitClient.release();
+      console.error(e);
+      return res.status(500).json({ error: "Could not debit tokens" });
+    }
+    debitClient.release();
+
+    const refundTokens = async (notes) => {
+      try {
+        await pool.query(
+          `INSERT INTO transactions (user_id, delta, name, notes)
+           VALUES ($1, $2, $3, $4)`,
+          [req.user.id, tokenCost, "Refund", String(notes || "").slice(0, 500)],
+        );
+      } catch (refundErr) {
+        console.error(refundErr);
+      }
+    };
+
+    let videoUrl;
+    try {
+      const out = await generateFalVideo({
+        modelId: model.id,
+        prompt,
+        durationSeconds,
+        referenceUrls,
+        width: proj.width,
+        height: proj.height,
+      });
+      videoUrl = out.url;
+    } catch (falErr) {
+      console.error(falErr);
+      await refundTokens(falErr.message || "fal video generation failed");
+      return res
+        .status(502)
+        .json({ error: String(falErr.message || "Video generation failed") });
+    }
+
+    if (!isProbablyAssetUrl(videoUrl)) {
+      await refundTokens("Invalid video URL from provider");
+      return res.status(502).json({ error: "Invalid video URL from provider" });
+    }
+
+    const saveClient = await pool.connect();
+    let savedFrameRow = null;
+    try {
+      await saveClient.query("BEGIN");
+      const upd = await saveClient.query(
+        `UPDATE frames
+         SET prompt = $1,
+             result = $2,
+             model = $3,
+             meta = COALESCE(meta, '{}'::jsonb) || $4::jsonb
+         WHERE id = $5 AND project_id = $6
+         RETURNING ${FRAME_COLUMNS}`,
+        [
+          prompt,
+          videoUrl,
+          model.id,
+          JSON.stringify({ kind: "video", durationSeconds }),
+          frameId,
+          projectId,
+        ],
+      );
+      if (upd.rows.length === 0) {
+        await saveClient.query("ROLLBACK");
+        await refundTokens("Frame row missing after generation");
+        return res.status(404).json({ error: "Frame not found" });
+      }
+      await saveClient.query("COMMIT");
+      savedFrameRow = upd.rows[0];
+    } catch (e) {
+      console.error(e);
+      await saveClient.query("ROLLBACK").catch(() => {});
+      await refundTokens(e.message || "save failed");
+      return res.status(500).json({ error: "Could not save frame" });
+    } finally {
+      saveClient.release();
+    }
+
+    const tokRow = await pool.query(`SELECT tokens FROM users WHERE id = $1`, [
+      req.user.id,
+    ]);
+    return res.json({
+      frame: savedFrameRow,
+      tokens: tokRow.rows[0]?.tokens ?? 0,
       tokenCost,
       model: { id: model.id, label: model.label, costCents: model.costCents },
     });

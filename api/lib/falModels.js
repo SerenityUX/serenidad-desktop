@@ -78,6 +78,70 @@ const FAL_IMAGE_MODELS = [
 
 const DEFAULT_MODEL_ID = "fal-ai/nano-banana-2";
 
+/**
+ * Video models exposed for the "video frame" type. Frames flagged
+ * `meta.kind === 'video'` use this catalog instead of the image one.
+ * costCents is per-call; durations are in seconds.
+ */
+/**
+ * Image-to-video endpoints on fal.ai. costCents is a rough per-call estimate;
+ * tune as you measure real spend. Default endpoint is happy-horse, which
+ * accepts a start frame, optional end frame, prompt, and duration.
+ */
+const FAL_VIDEO_MODELS = [
+  {
+    id: "fal-ai/happy-horse/image-to-video",
+    label: "Happy Horse",
+    costCents: 50,
+    family: "happy-horse",
+    defaultDuration: 4,
+  },
+  {
+    id: "fal-ai/bytedance/seedance/v1/pro/image-to-video",
+    label: "Seedance 1.0 Pro",
+    costCents: 60,
+    family: "seedance",
+    defaultDuration: 5,
+  },
+  {
+    id: "fal-ai/bytedance/seedance/v1/lite/image-to-video",
+    label: "Seedance 1.0 Lite",
+    costCents: 30,
+    family: "seedance",
+    defaultDuration: 5,
+  },
+  {
+    id: "fal-ai/kling-video/v2/master/image-to-video",
+    label: "Kling 2.0 Master",
+    costCents: 90,
+    family: "kling",
+    defaultDuration: 5,
+  },
+  {
+    id: "fal-ai/minimax/hailuo-02/standard/image-to-video",
+    label: "Hailuo 02",
+    costCents: 45,
+    family: "minimax",
+    defaultDuration: 6,
+  },
+  {
+    id: "fal-ai/wan/v2.2-a14b/image-to-video",
+    label: "Wan 2.2",
+    costCents: 40,
+    family: "wan",
+    defaultDuration: 5,
+  },
+  {
+    id: "fal-ai/luma-dream-machine/ray-2/image-to-video",
+    label: "Luma Ray 2",
+    costCents: 70,
+    family: "luma",
+    defaultDuration: 5,
+  },
+];
+
+const DEFAULT_VIDEO_MODEL_ID = "fal-ai/happy-horse/image-to-video";
+
 /* Hidden aliases keep frames stored against retired ids resolvable without exposing them in the picker. */
 const HIDDEN_ALIASES = [
   {
@@ -90,8 +154,10 @@ const HIDDEN_ALIASES = [
 ];
 
 const MODEL_BY_ID = new Map(
-  [...FAL_IMAGE_MODELS, ...HIDDEN_ALIASES].map((m) => [m.id, m]),
+  [...FAL_IMAGE_MODELS, ...HIDDEN_ALIASES, ...FAL_VIDEO_MODELS].map((m) => [m.id, m]),
 );
+
+const VIDEO_MODEL_IDS = new Set(FAL_VIDEO_MODELS.map((m) => m.id));
 
 function getModel(id) {
   return MODEL_BY_ID.get(String(id || "")) || null;
@@ -101,9 +167,23 @@ function resolveModelOrDefault(id) {
   return getModel(id) || getModel(DEFAULT_MODEL_ID);
 }
 
+function resolveVideoModelOrDefault(id) {
+  const m = getModel(id);
+  if (m && VIDEO_MODEL_IDS.has(m.id)) return m;
+  return getModel(DEFAULT_VIDEO_MODEL_ID);
+}
+
+function isVideoModel(id) {
+  return VIDEO_MODEL_IDS.has(String(id || ""));
+}
+
 module.exports = {
   FAL_IMAGE_MODELS,
+  FAL_VIDEO_MODELS,
   DEFAULT_MODEL_ID,
+  DEFAULT_VIDEO_MODEL_ID,
   getModel,
   resolveModelOrDefault,
+  resolveVideoModelOrDefault,
+  isVideoModel,
 };

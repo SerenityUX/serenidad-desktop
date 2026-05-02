@@ -19,16 +19,16 @@ const textareaStyle = (isTransitioning) => ({
   opacity: isTransitioning ? 0 : 1,
 });
 
-const PromptSection = ({ prompt, onPromptChange, isTransitioning }) => (
+const PromptSection = ({ prompt, onPromptChange, isTransitioning, promptLabel }) => (
   <>
-    <SectionHeader icon="icons/Prompt.svg" label="Prompt" />
+    <SectionHeader icon="icons/Prompt.svg" label={promptLabel === 'VIDEO PROMPT' ? 'Video Prompt' : 'Prompt'} />
 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
-      <FieldLabel>PROMPT</FieldLabel>
+      <FieldLabel>{promptLabel || 'PROMPT'}</FieldLabel>
       <textarea
         value={prompt}
         onChange={onPromptChange}
-        placeholder="Prompt..."
+        placeholder={promptLabel === 'VIDEO PROMPT' ? 'Describe the motion between the two frames...' : 'Prompt...'}
         style={textareaStyle(isTransitioning)}
       />
     </div>

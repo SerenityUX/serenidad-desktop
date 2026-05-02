@@ -35,6 +35,8 @@ const ScenesStrip = ({
   onAddSceneMouseDown,
   onAddSceneMouseUp,
   onAddSceneMouseLeave,
+  secondarySelectedScene,
+  onMakeVideoFrame,
 }) => {
   const [dragIndex, setDragIndex] = useState(null);
   const [dropTarget, setDropTarget] = useState(null); // index of slot (0..n)
@@ -85,7 +87,34 @@ const ScenesStrip = ({
     setDropTarget(null);
   };
 
+  const showMakeVideo = secondarySelectedScene && secondarySelectedScene !== selectedScene;
+
   return (
+    <div style={{ position: 'relative', width: '100%' }}>
+    {showMakeVideo && (
+      <button
+        type="button"
+        onClick={onMakeVideoFrame}
+        style={{
+          position: 'absolute',
+          top: -18,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: '#1F93FF',
+          color: '#fff',
+          border: 0,
+          borderRadius: 999,
+          padding: '8px 16px',
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: 'pointer',
+          zIndex: 5,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+        }}
+      >
+        Make Video Frame
+      </button>
+    )}
     <div
       id="bottom-bar"
       style={{
@@ -105,6 +134,7 @@ const ScenesStrip = ({
       {scenes.map((scene, index) => {
         const sceneNumber = index + 1;
         const isSelected = selectedScene === sceneNumber;
+        const isMultiSelected = secondarySelectedScene === sceneNumber;
         const showActionIcons =
           (!deletingScenes.has(selectedScene) && !currentlyLoading.includes(selectedScene)) || thumbnail != null;
 
@@ -119,6 +149,8 @@ const ScenesStrip = ({
               innerRef={(el) => (sceneRefs.current[sceneNumber] = el)}
               isHidden={false}
               isSelected={isSelected}
+              isMultiSelected={isMultiSelected}
+              isVideoFrame={scene.kind === 'video'}
               isPressed={pressedScene === sceneNumber}
               isMouseDown={isMouseDown}
               isDeleting={deletingScenes.has(sceneNumber)}
@@ -135,7 +167,7 @@ const ScenesStrip = ({
                 setDropTarget(null);
               }}
               onMouseDown={() => onSceneMouseDown(sceneNumber)}
-              onMouseUp={() => onSceneMouseUp(sceneNumber)}
+              onMouseUp={(event) => onSceneMouseUp(sceneNumber, event)}
               onMouseLeave={onSceneMouseLeave}
               onDelete={(skipConfirm) => onDeleteScene(index, skipConfirm)}
               onOpenFolder={() => onOpenFolder(sceneNumber)}
@@ -154,6 +186,7 @@ const ScenesStrip = ({
         onMouseUp={onAddSceneMouseUp}
         onMouseLeave={onAddSceneMouseLeave}
       />
+    </div>
     </div>
   );
 };

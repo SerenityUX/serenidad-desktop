@@ -20,6 +20,7 @@ const LeftSidebar = ({
   onFalModelChange,
   prompt,
   onPromptChange,
+  promptLabel,
   isTransitioning,
   references,
   onAddReferenceFiles,
@@ -28,6 +29,9 @@ const LeftSidebar = ({
   referencesUploading,
   modelSupportsReferences,
   sceneDuration,
+  videoMode,
+  videoDuration,
+  onVideoDurationChange,
   generateLabel,
   generateDisabled,
   onGenerate,
@@ -65,6 +69,7 @@ const LeftSidebar = ({
         prompt={prompt}
         onPromptChange={onPromptChange}
         isTransitioning={isTransitioning}
+        promptLabel={promptLabel}
       />
 
       <Divider />
@@ -78,7 +83,12 @@ const LeftSidebar = ({
         modelSupportsReferences={modelSupportsReferences}
       />
 
-      <DurationSection sceneDuration={sceneDuration} />
+      <DurationSection
+        sceneDuration={sceneDuration}
+        videoMode={videoMode}
+        videoDuration={videoDuration}
+        onVideoDurationChange={onVideoDurationChange}
+      />
     </div>
 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
