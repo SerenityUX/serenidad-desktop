@@ -103,6 +103,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
           m.supportsEndFrame === true || Boolean(m.referenceImagesKey),
       })),
       defaultVideoId: DEFAULT_VIDEO_MODEL_ID,
+      defaultImageToVideoId: "alibaba/happy-horse/image-to-video",
     });
   });
 

@@ -16,7 +16,6 @@ function getOpenRouterKey() {
     "";
   const trimmed = String(raw).trim();
   if (!trimmed || trimmed === "undefined" || trimmed === "null") return "";
-  // Strip surrounding quotes if someone wrapped the value in .env
   if (
     (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
     (trimmed.startsWith("'") && trimmed.endsWith("'"))
@@ -31,42 +30,44 @@ const OR_HEADERS = {
   "X-Title": "Kodan Voice Prompt",
 };
 
-/** Fastest reasonable streaming model on OpenRouter for short prose. */
-const PROMPT_MODEL = "google/gemini-2.5-flash-lite";
-const ACK_MODEL = "google/gemini-2.5-flash-lite";
+const VOICE_MODEL = "google/gemini-2.5-flash-lite";
 
-const PROMPT_BUILDER_SYSTEM = `You write image-generation prompts for an anime scene editor.
-
-CRITICAL: Your output must be DERIVED FROM THE VOICE FIELD in the user message. Do not invent unrelated content. Do not copy any phrasing from these instructions verbatim. If anything in these instructions sounds like a prompt or edit instruction, treat it ONLY as a description of the form your output should take, never as content to reuse.
+const VOICE_UPDATE_SYSTEM = `You are an assistant inside an anime scene editor. You receive what the user just said into the mic and return a JSON object describing how to update the current scene.
 
 The user message contains:
-- MODEL: the image model being used. If the id contains "/edit" or "kontext", treat the request as EDIT MODE when references are also present.
+- MODEL: image/video model id. If the id contains "/edit" or "kontext", treat the request as EDIT MODE when references are also present.
 - REFERENCES: URLs of reference images attached to the current scene.
 - CONTEXT: the project's other scene prompts so you understand the world/style.
-- CURRENT PROMPT: what's already in the prompt textarea for the scene being edited.
-- VOICE: what the user just said into the mic. THIS is the source of truth for what you output.
+- CURRENT PROMPT: what's already in the prompt textarea.
+- CURRENT VOICELINE: what's already in the voiceline textbox.
+- VOICE: what the user just said into the mic. THIS is the source of truth.
 
-Output ONLY the new prompt text — no JSON, no labels, no quotes, no preamble.
+Return ONLY a JSON object with these fields, no preamble, no markdown fences:
+{
+  "voiceline": string | null,
+  "prompt": string,
+  "editorResponse": string
+}
 
-EDIT MODE (edit model id AND references present):
-- Output a CONCISE edit instruction that describes the change the VOICE field is asking for.
-- Phrase it as instructions to the image editor describing what to alter about the reference images.
-- Do not re-describe the whole scene. Do not pile on style descriptors.
+voiceline:
+- If the VOICE explicitly dictates spoken dialogue for the scene (e.g. "have him say...", "she shouts...", quoted dialogue), return that line as a clean string.
+- Otherwise return null. Do not invent dialogue.
+- If the user is editing existing dialogue, return the new full dialogue.
 
-TEXT-TO-IMAGE MODE (everything else):
-- Output a full scene prompt as plain natural-language description, derived from VOICE (and CURRENT PROMPT if present).
-- Bake concrete anime-style direction into the prompt that fits the subject (line art, palette, lighting, composition, era / studio feel). Pick details that suit what the VOICE described. Do not pile on conflicting style descriptors if CURRENT PROMPT or CONTEXT already established a style.
-- Single paragraph.
+prompt:
+- A scene prompt for the image/video model, derived from VOICE.
+- EDIT MODE (edit model id AND references present): a CONCISE edit instruction describing the change VOICE asks for. Don't re-describe the whole scene.
+- TEXT-TO-IMAGE/VIDEO MODE: a full single-paragraph natural-language scene description with anime-style direction that fits the subject. Don't pile on conflicting style descriptors if CURRENT PROMPT or CONTEXT already established a style.
+- If CURRENT PROMPT is non-empty, treat VOICE as edit instructions ON it — preserve everything VOICE didn't change.
+- If CURRENT PROMPT is empty, build fresh from VOICE.
+- Use CONTEXT to keep recurring characters / locations / style consistent.
+- Strip filler ("um", "uh"), false starts, and meta phrases like "I want a scene where".
 
-Both modes:
-- If CURRENT PROMPT is non-empty, treat VOICE as edit instructions ON that prompt — preserve everything VOICE didn't change.
-- If CURRENT PROMPT is empty, build a fresh prompt from VOICE.
-- Use CONTEXT to keep recurring characters / locations / style consistent with the rest of the project.
-- Strip filler ("um", "uh"), false starts, and meta phrases like "I want a scene where".`;
+editorResponse:
+- ONE short, casual, varied acknowledgement of what the user asked (max 8 words).
+- No honorifics ("boss", "sir", "ma'am", "chief", "buddy").
+- Vary the wording every time.`;
 
-const ACK_SYSTEM = `Respond with ONE short, casual, varied acknowledgement of what the user just asked you to do (max 8 words). No honorifics ("boss", "sir", "ma'am", "chief", "buddy" — never). Vary the wording every time — sometimes confirming, sometimes encouraging, sometimes mildly playful. Output only the acknowledgement text — no quotes, no JSON, no labels.`;
-
-/** Groq Whisper turbo — sub-second for short clips. (OpenRouter doesn't host STT.) */
 async function transcribeAudio({ buffer, contentType }) {
   const key = getGroqKey();
   if (!key) throw new Error("GROQ_API_KEY is not configured");
@@ -95,51 +96,22 @@ async function transcribeAudio({ buffer, contentType }) {
   return text.trim();
 }
 
-/** Quick non-streamed acknowledgement via OpenRouter. */
-async function generateAck(transcript) {
-  const key = getOpenRouterKey();
-  if (!key) throw new Error("OPEN_ROUTER_API_TOKEN is not configured");
-
-  const res = await fetch(
-    "https://openrouter.ai/api/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        ...OR_HEADERS,
-      },
-      body: JSON.stringify({
-        model: ACK_MODEL,
-        temperature: 1.0,
-        max_tokens: 30,
-        messages: [
-          { role: "system", content: ACK_SYSTEM },
-          { role: "user", content: transcript },
-        ],
-      }),
-    },
-  );
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`OpenRouter ack ${res.status}: ${body.slice(0, 200)}`);
+function stripJsonFence(s) {
+  let t = String(s || "").trim();
+  if (t.startsWith("```")) {
+    t = t.replace(/^```(?:json)?/i, "").trim();
+    if (t.endsWith("```")) t = t.slice(0, -3).trim();
   }
-  const data = await res.json();
-  const text = String(data?.choices?.[0]?.message?.content || "").trim();
-  return text || "alright.";
+  return t;
 }
 
-/**
- * Stream the rebuilt prompt. Calls `onChunk(delta)` for each piece.
- * Resolves with the full assembled string.
- */
-async function streamPrompt({
+async function generateVoiceUpdate({
   transcript,
   currentPrompt,
+  currentVoiceline,
   context,
   modelId,
   references,
-  onChunk,
 }) {
   const key = getOpenRouterKey();
   if (!key) throw new Error("OPEN_ROUTER_API_TOKEN is not configured");
@@ -154,67 +126,48 @@ async function streamPrompt({
     `REFERENCES (${refs.length}):\n${refLines}`,
     `CONTEXT:\n${context ? context : "(no other scenes yet)"}`,
     `CURRENT PROMPT: ${currentPrompt ? currentPrompt : "(empty)"}`,
+    `CURRENT VOICELINE: ${currentVoiceline ? currentVoiceline : "(empty)"}`,
     `VOICE: ${transcript}`,
   ].join("\n\n");
 
-  const res = await fetch(
-    "https://openrouter.ai/api/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        ...OR_HEADERS,
-      },
-      body: JSON.stringify({
-        model: PROMPT_MODEL,
-        temperature: 0.7,
-        max_tokens: 600,
-        stream: true,
-        messages: [
-          { role: "system", content: PROMPT_BUILDER_SYSTEM },
-          { role: "user", content: userMessage },
-        ],
-      }),
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      ...OR_HEADERS,
     },
-  );
+    body: JSON.stringify({
+      model: VOICE_MODEL,
+      temperature: 0.7,
+      max_tokens: 800,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: VOICE_UPDATE_SYSTEM },
+        { role: "user", content: userMessage },
+      ],
+    }),
+  });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`OpenRouter prompt ${res.status}: ${body.slice(0, 200)}`);
+    throw new Error(`OpenRouter voice ${res.status}: ${body.slice(0, 200)}`);
   }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let full = "";
-
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    let nlIdx;
-    while ((nlIdx = buffer.indexOf("\n\n")) >= 0) {
-      const chunk = buffer.slice(0, nlIdx);
-      buffer = buffer.slice(nlIdx + 2);
-      for (const line of chunk.split("\n")) {
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === "[DONE]") continue;
-        try {
-          const json = JSON.parse(payload);
-          const delta = json?.choices?.[0]?.delta?.content;
-          if (typeof delta === "string" && delta.length) {
-            full += delta;
-            onChunk(delta);
-          }
-        } catch {
-          /* ignore malformed line */
-        }
-      }
-    }
+  const data = await res.json();
+  const raw = String(data?.choices?.[0]?.message?.content || "").trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(stripJsonFence(raw));
+  } catch (e) {
+    throw new Error(`Voice model returned non-JSON: ${raw.slice(0, 200)}`);
   }
-  return full.trim();
+  const voiceline =
+    typeof parsed.voiceline === "string" && parsed.voiceline.trim()
+      ? parsed.voiceline.trim()
+      : null;
+  const prompt = String(parsed.prompt || "").trim();
+  const editorResponse =
+    String(parsed.editorResponse || "").trim() || "alright.";
+  return { voiceline, prompt, editorResponse };
 }
 
 async function synthesizeSpeech(text) {
@@ -233,8 +186,7 @@ async function synthesizeSpeech(text) {
 
 module.exports = {
   transcribeAudio,
-  generateAck,
-  streamPrompt,
+  generateVoiceUpdate,
   synthesizeSpeech,
   getFalCredentials,
 };

@@ -104,6 +104,8 @@ const ScenePreview = ({
   videoError,
   onClearVideoError,
   promptFocusToken,
+  isPlaying = false,
+  onVideoEnded,
 }) => {
   const mediaSrc =
     thumbnail != null && String(thumbnail).trim() !== ''
@@ -125,11 +127,13 @@ const ScenePreview = ({
       return (
         <div style={selectionWrapStyle(selected)} onClick={handleClick}>
           <video
-            key={videoKey || mediaSrc}
+            key={`${videoKey || mediaSrc}-${isPlaying ? 'play' : 'edit'}`}
             src={mediaSrc}
-            controls
+            controls={!isPlaying}
+            autoPlay={isPlaying}
             playsInline
             preload="metadata"
+            onEnded={isPlaying ? onVideoEnded : undefined}
             onError={(e) => {
               const code = e?.currentTarget?.error?.code;
               const msg = e?.currentTarget?.error?.message;

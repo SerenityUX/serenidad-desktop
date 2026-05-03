@@ -2121,18 +2121,20 @@ ipcMain.handle('export-clip', async (event, mp4Path, pngPath, sceneNumber) => {
 });
 
 /**
- * Compose pre-rendered PNG frames into an mp4. Each frame is held on screen
- * for `secondsPerFrame` seconds. The renderer composes scene+caption into a
- * PNG using <canvas> (state-driven, like Remotion); ffmpeg only mux/encodes.
+ * Compose a mixed-media sequence of image and video segments into a single
+ * mp4. Each segment is encoded to a normalized intermediate (same codec/
+ * resolution/fps) and then concat-demuxer'd. Image segments are held for
+ * their `durationSeconds`; video segments play their natural length.
  */
 ipcMain.handle('export-project-mp4', async (event, payload) => {
   const {
-    pngDataUrls = [],
-    secondsPerFrame = 2,
+    segments = [],
+    width = 1280,
+    height = 720,
     suggestedName = 'export.mp4',
   } = payload || {};
-  if (!Array.isArray(pngDataUrls) || pngDataUrls.length === 0) {
-    throw new Error('No frames provided to export');
+  if (!Array.isArray(segments) || segments.length === 0) {
+    throw new Error('No segments provided to export');
   }
 
   const { canceled, filePath: targetPath } = await dialog.showSaveDialog({
@@ -2142,32 +2144,76 @@ ipcMain.handle('export-project-mp4', async (event, payload) => {
   });
   if (canceled || !targetPath) return null;
 
+  const w = Math.max(2, Math.floor(Number(width) || 1280));
+  const h = Math.max(2, Math.floor(Number(height) || 720));
+  const evenW = w - (w % 2);
+  const evenH = h - (h % 2);
+  const scaleFilter = `scale=${evenW}:${evenH}:force_original_aspect_ratio=decrease,pad=${evenW}:${evenH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
+  const fps = 30;
+
   const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kodan-export-'));
   try {
-    for (let i = 0; i < pngDataUrls.length; i++) {
-      const dataUrl = pngDataUrls[i];
-      const base64 = String(dataUrl).replace(/^data:image\/\w+;base64,/, '');
-      const buf = Buffer.from(base64, 'base64');
-      const name = `frame-${String(i).padStart(4, '0')}.png`;
-      await fs.promises.writeFile(path.join(tmpDir, name), buf);
+    const segmentPaths = [];
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i] || {};
+      const segOut = path.join(tmpDir, `seg-${String(i).padStart(4, '0')}.mp4`);
+      if (seg.kind === 'video') {
+        const localVideo = path.join(tmpDir, `src-${i}.mp4`);
+        await downloadToFile(seg.src, localVideo);
+        await new Promise((resolve, reject) => {
+          ffmpeg()
+            .input(localVideo)
+            .outputOptions([
+              '-c:v libx264',
+              '-pix_fmt yuv420p',
+              `-r ${fps}`,
+              '-vf', scaleFilter,
+              '-an',
+              '-movflags +faststart',
+            ])
+            .on('error', reject)
+            .on('end', resolve)
+            .save(segOut);
+        });
+      } else {
+        const dataUrl = seg.dataUrl || '';
+        const base64 = String(dataUrl).replace(/^data:image\/\w+;base64,/, '');
+        const pngPath = path.join(tmpDir, `src-${i}.png`);
+        await fs.promises.writeFile(pngPath, Buffer.from(base64, 'base64'));
+        const dur = Math.max(0.1, Number(seg.durationSeconds) || 2);
+        await new Promise((resolve, reject) => {
+          ffmpeg()
+            .input(pngPath)
+            .inputOptions(['-loop 1', `-t ${dur}`])
+            .outputOptions([
+              '-c:v libx264',
+              '-pix_fmt yuv420p',
+              `-r ${fps}`,
+              '-vf', scaleFilter,
+              '-movflags +faststart',
+            ])
+            .on('error', reject)
+            .on('end', resolve)
+            .save(segOut);
+        });
+      }
+      segmentPaths.push(segOut);
     }
 
-    const outPath = targetPath.endsWith('.mp4') ? targetPath : `${targetPath}.mp4`;
-    const inputRate = 1 / Math.max(0.1, Number(secondsPerFrame) || 2);
+    const concatListPath = path.join(tmpDir, 'concat.txt');
+    await fs.promises.writeFile(
+      concatListPath,
+      segmentPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'),
+    );
 
+    const outPath = targetPath.endsWith('.mp4') ? targetPath : `${targetPath}.mp4`;
     await new Promise((resolve, reject) => {
       ffmpeg()
-        .input(path.join(tmpDir, 'frame-%04d.png'))
-        .inputOptions([`-framerate ${inputRate}`])
-        .outputOptions([
-          '-c:v libx264',
-          '-pix_fmt yuv420p',
-          '-r 30',
-          '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
-          '-movflags +faststart',
-        ])
-        .on('error', (err) => reject(err))
-        .on('end', () => resolve())
+        .input(concatListPath)
+        .inputOptions(['-f concat', '-safe 0'])
+        .outputOptions(['-c copy', '-movflags +faststart'])
+        .on('error', reject)
+        .on('end', resolve)
         .save(outPath);
     });
 
@@ -2177,4 +2223,36 @@ ipcMain.handle('export-project-mp4', async (event, payload) => {
     fs.remove(tmpDir).catch(() => {});
   }
 });
+
+function downloadToFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    const get = (u, redirects = 0) => {
+      const client = u.startsWith('https:') ? https : http;
+      client
+        .get(u, (res) => {
+          if (
+            (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) &&
+            res.headers.location &&
+            redirects < 5
+          ) {
+            res.resume();
+            return get(res.headers.location, redirects + 1);
+          }
+          if (res.statusCode !== 200) {
+            file.close(() => fs.remove(destPath).catch(() => {}));
+            reject(new Error(`Download failed (${res.statusCode}) for ${u}`));
+            return;
+          }
+          res.pipe(file);
+          file.on('finish', () => file.close(resolve));
+        })
+        .on('error', (err) => {
+          file.close(() => fs.remove(destPath).catch(() => {}));
+          reject(err);
+        });
+    };
+    get(url);
+  });
+}
 

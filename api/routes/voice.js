@@ -3,8 +3,7 @@ const multer = require("multer");
 const { fal } = require("@fal-ai/client");
 const {
   transcribeAudio,
-  generateAck,
-  streamPrompt,
+  generateVoiceUpdate,
   synthesizeSpeech,
   getFalCredentials,
 } = require("../lib/voicePrompt");
@@ -114,6 +113,9 @@ module.exports = function createVoiceRouter(pool, requireAuth) {
       const currentPrompt = String(req.body?.current_prompt || "")
         .trim()
         .slice(0, 2000);
+      const currentVoiceline = String(req.body?.current_voiceline || "")
+        .trim()
+        .slice(0, 1000);
       const context = String(req.body?.context || "").trim().slice(0, 8000);
       const modelId = String(req.body?.model_id || "").trim().slice(0, 200);
       let references = [];
@@ -144,38 +146,32 @@ module.exports = function createVoiceRouter(pool, requireAuth) {
       }
       send("transcript", { text: transcript });
 
-      // Two parallel pipelines: quick ack + TTS, and streaming prompt.
-      const ackPipeline = (async () => {
-        try {
-          const ack = await generateAck(transcript);
-          send("response", { text: ack });
-          if (falKey) {
-            const audioUrl = await synthesizeSpeech(ack);
-            if (audioUrl) send("response_audio", { url: audioUrl });
-          }
-        } catch (e) {
-          console.warn("ack pipeline failed:", e.message);
-        }
-      })();
+      let update;
+      try {
+        update = await generateVoiceUpdate({
+          transcript,
+          currentPrompt,
+          currentVoiceline,
+          context,
+          modelId,
+          references,
+        });
+        send("voice_update", update);
+      } catch (e) {
+        console.error("voice update failed:", e.message);
+        await refundTokens(e.message || "voice update failed");
+        send("error", { error: `Voice update failed: ${e.message}` });
+        return res.end();
+      }
 
-      const promptPipeline = (async () => {
+      if (falKey && update.editorResponse) {
         try {
-          const finalPrompt = await streamPrompt({
-            transcript,
-            currentPrompt,
-            context,
-            modelId,
-            references,
-            onChunk: (delta) => send("prompt_chunk", { delta }),
-          });
-          send("prompt_done", { text: finalPrompt });
+          const audioUrl = await synthesizeSpeech(update.editorResponse);
+          if (audioUrl) send("response_audio", { url: audioUrl });
         } catch (e) {
-          console.error("prompt pipeline failed:", e.message);
-          send("error", { error: `Prompt build failed: ${e.message}` });
+          console.warn("TTS failed:", e.message);
         }
-      })();
-
-      await Promise.allSettled([ackPipeline, promptPipeline]);
+      }
 
       const tokRow = await pool.query(
         `SELECT tokens FROM users WHERE id = $1`,

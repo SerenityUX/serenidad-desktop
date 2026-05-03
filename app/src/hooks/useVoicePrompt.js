@@ -5,6 +5,9 @@ const TRIGGER_KEY = '`';
 const DOT_COUNT = 3;
 const SILENT_LEVELS = new Array(DOT_COUNT).fill(0);
 const MIC_SENSITIVITY = 7;
+const MIN_RECORD_MS = 600;
+const VOICE_PEAK_THRESHOLD = 0.18;
+const MIN_VOICE_FRAMES = 4;
 
 const isEditableTarget = (el) => {
   if (!el) return false;
@@ -40,9 +43,10 @@ const playBubble = (audioCtx) => {
  * Returns { active, mode: 'listening'|'loading', levels }.
  */
 export default function useVoicePrompt({
-  onPrompt,
+  onUpdate,
   getAuthToken,
   getCurrentPrompt,
+  getCurrentVoiceline,
   getContext,
   getModelId,
   getReferences,
@@ -61,22 +65,28 @@ export default function useVoicePrompt({
   const isRecordingRef = useRef(false);
   const pendingStopRef = useRef(false);
   const responseAudioRef = useRef(null);
-  const onPromptRef = useRef(onPrompt);
+  const peakLevelRef = useRef(0);
+  const voiceFramesRef = useRef(0);
+  const onUpdateRef = useRef(onUpdate);
   const getAuthTokenRef = useRef(getAuthToken);
   const getCurrentPromptRef = useRef(getCurrentPrompt);
+  const getCurrentVoicelineRef = useRef(getCurrentVoiceline);
   const getContextRef = useRef(getContext);
   const getModelIdRef = useRef(getModelId);
   const getReferencesRef = useRef(getReferences);
 
   useEffect(() => {
-    onPromptRef.current = onPrompt;
-  }, [onPrompt]);
+    onUpdateRef.current = onUpdate;
+  }, [onUpdate]);
   useEffect(() => {
     getAuthTokenRef.current = getAuthToken;
   }, [getAuthToken]);
   useEffect(() => {
     getCurrentPromptRef.current = getCurrentPrompt;
   }, [getCurrentPrompt]);
+  useEffect(() => {
+    getCurrentVoicelineRef.current = getCurrentVoiceline;
+  }, [getCurrentVoiceline]);
   useEffect(() => {
     getContextRef.current = getContext;
   }, [getContext]);
@@ -124,6 +134,8 @@ export default function useVoicePrompt({
         fd.append('audio', blob, 'voice.webm');
         const currentPrompt = getCurrentPromptRef.current?.() || '';
         if (currentPrompt) fd.append('current_prompt', currentPrompt);
+        const currentVoiceline = getCurrentVoicelineRef.current?.() || '';
+        if (currentVoiceline) fd.append('current_voiceline', currentVoiceline);
         const context = getContextRef.current?.() || '';
         if (context) fd.append('context', context);
         const modelId = getModelIdRef.current?.() || '';
@@ -147,18 +159,16 @@ export default function useVoicePrompt({
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        let accPrompt = '';
-        let promptStarted = false;
         let audioPlayed = false;
 
         const handleEvent = (event, data) => {
-          if (event === 'prompt_chunk' && typeof data?.delta === 'string') {
-            accPrompt += data.delta;
-            promptStarted = true;
-            onPromptRef.current?.(accPrompt);
-          } else if (event === 'prompt_done' && typeof data?.text === 'string') {
-            accPrompt = data.text;
-            onPromptRef.current?.(accPrompt);
+          if (event === 'voice_update' && data && typeof data === 'object') {
+            onUpdateRef.current?.({
+              voiceline: typeof data.voiceline === 'string' ? data.voiceline : null,
+              prompt: typeof data.prompt === 'string' ? data.prompt : '',
+              editorResponse:
+                typeof data.editorResponse === 'string' ? data.editorResponse : '',
+            });
           } else if (event === 'response_audio' && data?.url && !audioPlayed) {
             audioPlayed = true;
             try {
@@ -197,9 +207,6 @@ export default function useVoicePrompt({
             }
           }
         }
-        if (!promptStarted && !accPrompt) {
-          // No prompt arrived (probably an error); just bail silently.
-        }
         dismiss();
       } catch (e) {
         console.error('voice prompt error:', e);
@@ -213,6 +220,8 @@ export default function useVoicePrompt({
     if (isRecordingRef.current) return;
     isRecordingRef.current = true;
     pendingStopRef.current = false;
+    peakLevelRef.current = 0;
+    voiceFramesRef.current = 0;
     setActive(true);
     setMode('listening');
     setLevels(SILENT_LEVELS);
@@ -256,6 +265,8 @@ export default function useVoicePrompt({
       }
       const rms = Math.sqrt(sumSq / buf.length);
       const norm = Math.min(1, rms * MIC_SENSITIVITY);
+      if (norm > peakLevelRef.current) peakLevelRef.current = norm;
+      if (norm >= VOICE_PEAK_THRESHOLD) voiceFramesRef.current += 1;
       setLevels((prev) => {
         const next = prev.slice(1);
         next.push(norm);
@@ -295,8 +306,15 @@ export default function useVoicePrompt({
       const type = recorder.mimeType || 'audio/webm';
       const blob = new Blob(chunksRef.current, { type });
       const elapsed = Date.now() - startedAtRef.current;
+      const peak = peakLevelRef.current;
+      const voiceFrames = voiceFramesRef.current;
       cleanupRecording();
-      if (blob.size < 800 || elapsed < 250) {
+      if (
+        blob.size < 800 ||
+        elapsed < MIN_RECORD_MS ||
+        peak < VOICE_PEAK_THRESHOLD ||
+        voiceFrames < MIN_VOICE_FRAMES
+      ) {
         dismiss();
         return;
       }

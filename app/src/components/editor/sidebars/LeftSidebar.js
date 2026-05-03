@@ -28,10 +28,9 @@ const LeftSidebar = ({
   onRemoveReference,
   referencesUploading,
   modelSupportsReferences,
-  sceneDuration,
   videoMode,
-  videoDuration,
-  onVideoDurationChange,
+  sceneDuration,
+  onSceneDurationChange,
   generateLabel,
   generateDisabled,
   onGenerate,
@@ -88,10 +87,9 @@ const LeftSidebar = ({
       />
 
       <DurationSection
-        sceneDuration={sceneDuration}
         videoMode={videoMode}
-        videoDuration={videoDuration}
-        onVideoDurationChange={onVideoDurationChange}
+        sceneDuration={sceneDuration}
+        onSceneDurationChange={onSceneDurationChange}
       />
     </div>
 
@@ -100,7 +98,7 @@ const LeftSidebar = ({
       <GenerateVisualsButton label={generateLabel} disabled={generateDisabled} onClick={onGenerate} />
       {showMakeVideoFromCurrent && (
         <GenerateVisualsButton
-          label="Make Video Frame"
+          label="Convert to Video"
           disabled={makeVideoFromCurrentDisabled}
           onClick={onMakeVideoFromCurrent}
         />

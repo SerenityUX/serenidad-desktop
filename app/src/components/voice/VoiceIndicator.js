@@ -1,7 +1,6 @@
 import React from 'react';
 
 const DOT_COUNT = 3;
-/** Container is sized to never change with bar height. */
 const PILL_HEIGHT = 24;
 const PILL_WIDTH = 44;
 const VIZ_HEIGHT = 16;
@@ -10,14 +9,12 @@ const MIN_BAR = 3;
 const MAX_BAR = VIZ_HEIGHT;
 
 /**
- * Inline voice pill: 3 vertical white bars on dark grey, traditional EQ style.
- * Bars grow vertically from center inside a fixed-size container so the pill
- * never resizes.
- *
- * - mode "listening": bar heights track rolling mic levels
- * - mode "loading": bars stay short, opacity cycles sequentially
+ * Inline voice pill with expand/collapse animation.
+ * Renders a 24×24 circle that expands horizontally into a pill while bars
+ * fade in. When `expanded` flips back to false, it contracts to a circle so
+ * the parent can unmount it after the transition.
  */
-const VoiceIndicator = ({ mode = 'listening', levels }) => {
+const VoiceIndicator = ({ mode = 'listening', levels, expanded = true }) => {
   const isLoading = mode === 'loading';
   const safeLevels =
     Array.isArray(levels) && levels.length === DOT_COUNT
@@ -31,11 +28,15 @@ const VoiceIndicator = ({ mode = 'listening', levels }) => {
         alignItems: 'center',
         justifyContent: 'center',
         height: PILL_HEIGHT,
-        width: PILL_WIDTH,
-        borderRadius: 12,
+        width: expanded ? PILL_WIDTH : PILL_HEIGHT,
+        borderRadius: PILL_HEIGHT / 2,
         background: '#404040',
+        overflow: 'hidden',
         WebkitAppRegion: 'no-drag',
         flexShrink: 0,
+        transition:
+          'width 260ms cubic-bezier(0.22, 1, 0.36, 1), transform 260ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transform: expanded ? 'scale(1)' : 'scale(0.92)',
       }}
     >
       <style>{`
@@ -52,6 +53,8 @@ const VoiceIndicator = ({ mode = 'listening', levels }) => {
           gap: 4,
           height: VIZ_HEIGHT,
           width: DOT_COUNT * BAR_WIDTH + (DOT_COUNT - 1) * 4,
+          opacity: expanded ? 1 : 0,
+          transition: 'opacity 180ms ease',
         }}
       >
         {[0, 1, 2].map((i) => {

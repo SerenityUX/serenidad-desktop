@@ -12,7 +12,8 @@ import ProjectLoadingSkeleton from './ProjectLoadingSkeleton';
 import { composeSceneToPng } from '../../lib/composeScene';
 import useVoicePrompt from '../../hooks/useVoicePrompt';
 
-const SECONDS_PER_FRAME = 2;
+const DEFAULT_IMAGE_DURATION = 2;
+const DEFAULT_VIDEO_DURATION = 4;
 
 const REMOTE_CAPTION_DEFAULT = {
   fontSize: 16,
@@ -30,6 +31,11 @@ function remoteDetailToProjectData(projectRow, frames) {
     name: projectRow.name,
     scenes: (frames || []).map((f) => {
       const meta = f.meta && typeof f.meta === 'object' ? f.meta : {};
+      const kind = meta.kind === 'video' ? 'video' : 'image';
+      const rawDuration = Number(meta.durationSeconds);
+      const durationSeconds = rawDuration > 0
+        ? rawDuration
+        : (kind === 'video' ? DEFAULT_VIDEO_DURATION : DEFAULT_IMAGE_DURATION);
       return {
         frameId: f.id,
         id: f.id,
@@ -41,8 +47,8 @@ function remoteDetailToProjectData(projectRow, frames) {
         speaker: meta.speaker || 'Narrator',
         baseModel: meta.baseModel || '',
         selectedLora: meta.selectedLora || '',
-        kind: meta.kind === 'video' ? 'video' : 'image',
-        durationSeconds: Number(meta.durationSeconds) || null,
+        kind,
+        durationSeconds,
         captionSettings: {
           ...REMOTE_CAPTION_DEFAULT,
           ...(meta.captionSettings || {}),
@@ -87,7 +93,6 @@ const ProjectComponent = ({ projectId }) => {
   const [imgW, setImgW] = useState(0);
   const [imgH, setImgH] = useState(0);
   const [videoKey, setVideoKey] = useState(null);
-  const [sceneDuration, setSceneDuration] = useState(null);
   const [thumbnailTimestamps, setThumbnailTimestamps] = useState({});
 
   // Compose mode
@@ -99,9 +104,6 @@ const ProjectComponent = ({ projectId }) => {
   // Voice
   const [voiceText, setVoiceText] = useState('');
   const [speakerWav, setSpeakerWav] = useState('Narrator');
-  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
-  const [generateText, setGenerateText] = useState('Generate Voice');
-  const [voices, setVoices] = useState([]);
 
   // Models
   const [baseModel, setBaseModel] = useState('');
@@ -119,15 +121,20 @@ const ProjectComponent = ({ projectId }) => {
   const [defaultFalModelId, setDefaultFalModelId] = useState('fal-ai/nano-banana-2');
   const [selectedFalModel, setSelectedFalModel] = useState('fal-ai/nano-banana-2');
   const [falVideoModels, setFalVideoModels] = useState([]);
-  const [defaultFalVideoModelId, setDefaultFalVideoModelId] = useState('fal-ai/happy-horse/image-to-video');
+  const [defaultFalVideoModelId, setDefaultFalVideoModelId] = useState('alibaba/happy-horse/reference-to-video');
+  // Used by the single-frame "Convert to Video" button — image-to-video, not
+  // reference-to-video, so a single image animates instead of being treated
+  // as one of many conditioning refs.
+  const [defaultImageToVideoModelId, setDefaultImageToVideoModelId] = useState('alibaba/happy-horse/image-to-video');
 
   // Multi-select for "Make Video Frame" — array of scene numbers (1-based)
   // that are *additionally* selected via shift-click; the primary
   // `selectedScene` is always also part of the visual multi-selection.
   const [multiSelectedScenes, setMultiSelectedScenes] = useState([]);
 
-  // Video frame state (per-scene fields, hydrated when selectedScene changes)
-  const [videoDuration, setVideoDuration] = useState(4);
+  // Per-scene duration input (hydrated when selectedScene changes). Used for
+  // both image (hold time) and video (generation/playback) frames.
+  const [sceneDuration, setSceneDuration] = useState(DEFAULT_IMAGE_DURATION);
   const [creatingVideo, setCreatingVideo] = useState(false);
   const [videoError, setVideoError] = useState(null);
   const [videoStatusMessage, setVideoStatusMessage] = useState('');
@@ -138,6 +145,11 @@ const ProjectComponent = ({ projectId }) => {
 
   // Image selection (for cmd+c / cmd+v on the generated visual)
   const [imageSelected, setImageSelected] = useState(false);
+
+  // Sequential playback across scenes (image holds for durationSeconds; video
+  // plays to its natural end and fires onEnded to advance).
+  const [isPlaying, setIsPlaying] = useState(false);
+  const playTimerRef = useRef(null);
 
   // Generation
   const [currentlyLoading, setCurrentlyLoading] = useState([]);
@@ -333,23 +345,6 @@ const ProjectComponent = ({ projectId }) => {
     }
     setComposeComplete(true);
   };
-
-  // ---------- Voice generation ----------
-  const generateVoiceLine = async (_sceneIndex) => {
-    window.alert('Voice generation is not available for cloud-only projects in this build.');
-  };
-
-  useEffect(() => {
-    if (isRemote) return undefined;
-    const checkVoiceGenerationStatus = async () => {
-      const status = await window.electron.ipcRenderer.invoke('check-voice-generation-status', selectedScene);
-      setIsGeneratingVoice(status);
-      setGenerateText(status ? 'Generating' : 'Generate Voice');
-    };
-    checkVoiceGenerationStatus();
-    const intervalId = setInterval(checkVoiceGenerationStatus, 1000);
-    return () => clearInterval(intervalId);
-  }, [selectedScene, isRemote]);
 
   const copyImageToClipboard = useCallback(async (url) => {
     try {
@@ -630,7 +625,6 @@ const ProjectComponent = ({ projectId }) => {
     } else {
       setThumbnail('');
     }
-    setSceneDuration(null);
     setVideoKey(null);
   }, [isRemote, selectedScene, projectData]);
 
@@ -880,7 +874,7 @@ const ProjectComponent = ({ projectId }) => {
       const referenceUrls = [source.thumbnail];
 
       await patchFrame(newFrameId, {
-        model: defaultFalVideoModelId,
+        model: defaultImageToVideoModelId,
         reference_urls: referenceUrls,
         meta: {
           kind: 'video',
@@ -902,7 +896,7 @@ const ProjectComponent = ({ projectId }) => {
           thumbnail: '',
           positivePrompt: '',
           references: referenceUrls,
-          model: defaultFalVideoModelId,
+          model: defaultImageToVideoModelId,
           voiceline: '',
           speaker: 'Narrator',
           baseModel: '',
@@ -940,6 +934,10 @@ const ProjectComponent = ({ projectId }) => {
       window.alert('Enter a video prompt first.');
       return;
     }
+    const voiceline = String(voiceText || '').trim();
+    const augmentedPrompt = voiceline
+      ? `${promptText}\n\nVoiceline (${speakerWav || 'Narrator'}): "${voiceline}"`
+      : promptText;
     setCreatingVideo(true);
     setVideoError(null);
     setVideoStatusMessage(
@@ -959,9 +957,9 @@ const ProjectComponent = ({ projectId }) => {
             Accept: 'application/json',
           },
           body: JSON.stringify({
-            prompt: promptText,
+            prompt: augmentedPrompt,
             model: selectedFalModel || defaultFalVideoModelId,
-            durationSeconds: videoDuration,
+            durationSeconds: sceneDuration,
           }),
         },
       );
@@ -1073,6 +1071,7 @@ const ProjectComponent = ({ projectId }) => {
         if (Array.isArray(body.videoModels)) {
           setFalVideoModels(body.videoModels);
           if (body.defaultVideoId) setDefaultFalVideoModelId(body.defaultVideoId);
+          if (body.defaultImageToVideoId) setDefaultImageToVideoModelId(body.defaultImageToVideoId);
         }
       } catch (e) {
         console.error('Failed to load fal models:', e);
@@ -1110,7 +1109,10 @@ const ProjectComponent = ({ projectId }) => {
         }));
 
         setLocalCaption(currentScene.captionSettings?.caption || '');
-        setVideoDuration(Number(currentScene.durationSeconds) || 4);
+        setSceneDuration(
+          Number(currentScene.durationSeconds) ||
+            (currentScene.kind === 'video' ? DEFAULT_VIDEO_DURATION : DEFAULT_IMAGE_DURATION),
+        );
         setVideoError(null);
         setVideoStatusMessage('');
         setIsTransitioning(false);
@@ -1353,20 +1355,50 @@ const ProjectComponent = ({ projectId }) => {
     updateScenePrompts(newPrompt);
   };
 
-  const handleVoicePrompt = useCallback(
-    (text) => {
-      const trimmed = String(text || '').trim();
+  const applyVoicelineToCaptionIfEmpty = useCallback(
+    (line) => {
+      const trimmed = String(line || '').trim();
       if (!trimmed) return;
-      setPrompt(trimmed);
-      updateScenePrompts(trimmed);
+      const currentCaption = (captionSettings.caption || '').trim();
+      if (currentCaption) return;
+      setLocalCaption(trimmed);
+      updateCaptionSettings({ caption: trimmed });
     },
-    [updateScenePrompts],
+    [captionSettings.caption, updateCaptionSettings],
+  );
+
+  const handleVoiceUpdate = useCallback(
+    ({ voiceline, prompt: newPrompt, editorResponse }) => {
+      const trimmedPrompt = String(newPrompt || '').trim();
+      if (trimmedPrompt) {
+        setPrompt(trimmedPrompt);
+        updateScenePrompts(trimmedPrompt);
+      }
+      if (typeof voiceline === 'string') {
+        const trimmedVoiceline = voiceline.trim();
+        setVoiceText(trimmedVoiceline);
+        updateSceneVoiceline(trimmedVoiceline, speakerWav);
+        if (trimmedVoiceline) {
+          applyVoicelineToCaptionIfEmpty(trimmedVoiceline);
+        }
+      }
+      if (editorResponse) {
+        console.log('[voice] editor:', editorResponse);
+      }
+    },
+    [
+      updateScenePrompts,
+      updateSceneVoiceline,
+      speakerWav,
+      applyVoicelineToCaptionIfEmpty,
+    ],
   );
 
   const voice = useVoicePrompt({
-    onPrompt: handleVoicePrompt,
+    onUpdate: handleVoiceUpdate,
     getAuthToken: () => authToken,
     getCurrentPrompt: () => prompt,
+    getCurrentVoiceline: () => voiceText,
     getModelId: () => selectedFalModel,
     getReferences: () =>
       (references || [])
@@ -1395,14 +1427,14 @@ const ProjectComponent = ({ projectId }) => {
     updateSceneVoiceline(newVoiceText, speakerWav);
   };
 
-  const handleSpeakerChange = async (event) => {
+  const handleSpeakerChange = (event) => {
     const newSpeaker = event.target.value;
-    if (newSpeaker === 'add-voice') {
-      await handleAddVoice();
-    } else {
-      setSpeakerWav(newSpeaker);
-      updateSceneVoiceline(voiceText, newSpeaker);
-    }
+    setSpeakerWav(newSpeaker);
+    updateSceneVoiceline(voiceText, newSpeaker);
+  };
+
+  const handleVoiceTextBlur = () => {
+    applyVoicelineToCaptionIfEmpty(voiceText);
   };
 
   // ---------- Scenes strip ----------
@@ -1586,41 +1618,61 @@ const ProjectComponent = ({ projectId }) => {
     setCurrentFact(animeFacts[Math.floor(Math.random() * animeFacts.length)]);
   }, [selectedScene]);
 
-  // ---------- Voices ----------
-  useEffect(() => {
-    loadVoices();
-  }, [isRemote]);
+  // ---------- Sequential playback ----------
+  const stopPlayback = useCallback(() => {
+    if (playTimerRef.current) {
+      clearTimeout(playTimerRef.current);
+      playTimerRef.current = null;
+    }
+    setIsPlaying(false);
+  }, []);
 
-  const loadVoices = async () => {
-    if (isRemote) {
-      setVoices([]);
+  const advancePlayback = useCallback(() => {
+    const total = projectData?.scenes?.length || 0;
+    if (!total) {
+      stopPlayback();
       return;
     }
-    try {
-      const voiceFiles = await window.electron.ipcRenderer.invoke('get-voices');
-      setVoices(voiceFiles);
-    } catch (error) {
-      console.error('Failed to load voices:', error);
-    }
-  };
-
-  const handleAddVoice = async () => {
-    if (isRemote) {
-      window.alert('Voice files live on disk in this app; cloud-only mode does not add voices yet.');
-      return;
-    }
-    try {
-      const result = await window.electron.ipcRenderer.invoke('add-voice');
-      if (result) {
-        await loadVoices();
-        const newVoiceName = result.split('.')[0];
-        setSpeakerWav(newVoiceName);
-        updateSceneVoiceline(voiceText, newVoiceName);
+    setSelectedScene((prev) => {
+      if (prev >= total) {
+        stopPlayback();
+        return prev;
       }
-    } catch (error) {
-      console.error('Failed to add voice:', error);
+      return prev + 1;
+    });
+  }, [projectData, stopPlayback]);
+
+  const togglePlayback = useCallback(() => {
+    if (isPlaying) {
+      stopPlayback();
+      return;
     }
-  };
+    if (!projectData?.scenes?.length) return;
+    setIsPlaying(true);
+  }, [isPlaying, stopPlayback, projectData]);
+
+  // While playing on an image scene, hold for its duration then advance.
+  // Video scenes self-advance via the <video> onEnded handler.
+  useEffect(() => {
+    if (!isPlaying) return undefined;
+    const scene = projectData?.scenes?.[selectedScene - 1];
+    if (!scene) {
+      stopPlayback();
+      return undefined;
+    }
+    if (scene.kind === 'video') return undefined;
+    const dur = Math.max(
+      0.1,
+      Number(scene.durationSeconds) || DEFAULT_IMAGE_DURATION,
+    );
+    const id = setTimeout(advancePlayback, dur * 1000);
+    playTimerRef.current = id;
+    return () => clearTimeout(id);
+  }, [isPlaying, selectedScene, projectData, advancePlayback, stopPlayback]);
+
+  useEffect(() => () => {
+    if (playTimerRef.current) clearTimeout(playTimerRef.current);
+  }, []);
 
   // ---------- Export ----------
   useEffect(() => {
@@ -1645,15 +1697,25 @@ const ProjectComponent = ({ projectId }) => {
   const exportScenesAsMp4 = async (scenes, suggestedName) => {
     const w = imgW || 1280;
     const h = imgH || 720;
-    const pngs = [];
+    const segments = [];
     for (const s of scenes) {
-      // eslint-disable-next-line no-await-in-loop
-      const png = await composeSceneToPng(s, { width: w, height: h });
-      pngs.push(png);
+      const durationSeconds =
+        Number(s.durationSeconds) ||
+        (s.kind === 'video' ? DEFAULT_VIDEO_DURATION : DEFAULT_IMAGE_DURATION);
+      if (s.kind === 'video') {
+        // Use the source video as-is (its natural duration). Caption overlays
+        // for video segments are not baked in this pass.
+        segments.push({ kind: 'video', src: s.thumbnail, durationSeconds });
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        const png = await composeSceneToPng(s, { width: w, height: h });
+        segments.push({ kind: 'image', dataUrl: png, durationSeconds });
+      }
     }
     return window.electron.ipcRenderer.invoke('export-project-mp4', {
-      pngDataUrls: pngs,
-      secondsPerFrame: SECONDS_PER_FRAME,
+      segments,
+      width: w,
+      height: h,
       suggestedName,
     });
   };
@@ -1803,12 +1865,12 @@ const ProjectComponent = ({ projectId }) => {
   const currentScene = projectData?.scenes?.[selectedScene - 1];
   const isVideoFrame = currentScene?.kind === 'video';
 
-  const handleVideoDurationChange = (event) => {
+  const handleSceneDurationChange = (event) => {
     const v = Math.max(1, Math.min(30, parseInt(event.target.value, 10) || 1));
-    setVideoDuration(v);
+    setSceneDuration(v);
     if (currentScene?.frameId) {
       patchFrame(currentScene.frameId, { meta: { durationSeconds: v } }).catch((e) =>
-        console.error('Failed to update video duration:', e),
+        console.error('Failed to update scene duration:', e),
       );
       setProjectData((prev) => ({
         ...prev,
@@ -1826,6 +1888,9 @@ const ProjectComponent = ({ projectId }) => {
       onShare={() => setShareOpen(true)}
       showShare={isRemote && Boolean(authToken)}
       voice={voice}
+      isPlaying={isPlaying}
+      onTogglePlay={togglePlayback}
+      canPlay={Boolean(projectData?.scenes?.length)}
       leftSidebarProps={{
         baseModel,
         baseModels,
@@ -1850,10 +1915,9 @@ const ProjectComponent = ({ projectId }) => {
         modelSupportsReferences: isVideoFrame
           ? true
           : (falModels.find((m) => m.id === selectedFalModel)?.supportsReferences ?? true),
-        sceneDuration,
         videoMode: isVideoFrame,
-        videoDuration,
-        onVideoDurationChange: handleVideoDurationChange,
+        sceneDuration,
+        onSceneDurationChange: handleSceneDurationChange,
         generateLabel: isVideoFrame
           ? (creatingVideo ? 'Creating Video…' : 'Create Video')
           : (generateImageText[selectedScene] || 'Generate Visuals'),
@@ -1899,16 +1963,15 @@ const ProjectComponent = ({ projectId }) => {
           videoError,
           onClearVideoError: () => setVideoError(null),
           promptFocusToken,
+          isPlaying,
+          onVideoEnded: advancePlayback,
         },
         voiceLineProps: {
           voiceText,
           onVoiceTextChange: handleVoiceTextChange,
+          onVoiceTextBlur: handleVoiceTextBlur,
           speakerWav,
-          voices,
           onSpeakerChange: handleSpeakerChange,
-          onGenerateVoice: () => generateVoiceLine(selectedScene),
-          isGeneratingVoice,
-          generateText,
         },
       }}
       rightSidebarProps={{

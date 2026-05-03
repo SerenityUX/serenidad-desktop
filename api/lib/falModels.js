@@ -153,11 +153,9 @@ const FAL_VIDEO_MODELS = [
     endFrameKey: "last_image_url",
   },
   {
-    // Reference-to-video, not image-to-video: accepts an array of reference
-    // images that all condition the output. No start/end semantics.
+    // Reference-to-video: array of refs all condition the output. Used when
+    // shift-selecting multiple frames and tapping "Make Video Frame".
     // Docs: https://fal.ai/models/alibaba/happy-horse/reference-to-video
-    // The fal id is the path after /models/ — no `fal-ai/` prefix because
-    // it's an Alibaba-published model, not a fal-owned endpoint.
     id: "alibaba/happy-horse/reference-to-video",
     label: "Happy Horse (reference-to-video)",
     costCents: 50,
@@ -166,6 +164,18 @@ const FAL_VIDEO_MODELS = [
     supportsReferences: true,
     supportsEndFrame: false,
     referenceImagesKey: "image_urls",
+  },
+  {
+    // Plain image-to-video: single start image + prompt → animation. Used
+    // when you tap "Convert to Video" on one frame.
+    // Docs: https://fal.ai/models/alibaba/happy-horse/image-to-video/playground
+    id: "alibaba/happy-horse/image-to-video",
+    label: "Happy Horse (image-to-video)",
+    costCents: 50,
+    family: "happy-horse",
+    defaultDuration: 4,
+    supportsReferences: true,
+    supportsEndFrame: false,
   },
   {
     id: "fal-ai/minimax/hailuo-02/standard/image-to-video",
@@ -202,8 +212,8 @@ const HIDDEN_ALIASES = [
     family: "nano-banana",
   },
   {
-    // Old image-to-video endpoint name. Resolves to the same params shape as
-    // the current reference-to-video model so legacy frames keep working.
+    // Legacy id used before the alibaba namespace was discovered. Routes to
+    // the real image-to-video endpoint so old frames still resolve.
     id: "fal-ai/happy-horse/image-to-video",
     label: "Happy Horse (legacy)",
     costCents: 50,
@@ -211,8 +221,7 @@ const HIDDEN_ALIASES = [
     defaultDuration: 4,
     supportsReferences: true,
     supportsEndFrame: false,
-    referenceImagesKey: "image_urls",
-    aliasOf: "alibaba/happy-horse/reference-to-video",
+    aliasOf: "alibaba/happy-horse/image-to-video",
   },
 ];
 

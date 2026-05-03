@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import ProfileAvatarMenu from '../ProfileAvatarMenu';
 import VoiceIndicator from '../voice/VoiceIndicator';
 import { useAuth } from '../../context/AuthContext';
@@ -17,7 +17,58 @@ const TrafficLight = ({ color, action }) => (
   />
 );
 
-const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voice }) => {
+const EXIT_ANIM_MS = 280;
+
+const CenterSlot = ({ voice }) => {
+  const active = !!voice?.active;
+  const [mounted, setMounted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (active) {
+      setMounted(true);
+      // Two RAFs so the initial circle paints before transitioning to pill.
+      let raf2 = 0;
+      const raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => setExpanded(true));
+      });
+      return () => {
+        cancelAnimationFrame(raf1);
+        if (raf2) cancelAnimationFrame(raf2);
+      };
+    }
+    if (mounted) {
+      setExpanded(false);
+      const t = setTimeout(() => setMounted(false), EXIT_ANIM_MS);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [active, mounted]);
+
+  if (mounted) {
+    return (
+      <VoiceIndicator
+        mode={voice?.mode}
+        levels={voice?.levels}
+        expanded={expanded}
+      />
+    );
+  }
+  return (
+    <p style={{ fontWeight: 500, margin: 0, WebkitAppRegion: 'drag' }}>Kōdan</p>
+  );
+};
+
+const TitleBar = ({
+  onExport,
+  onShare,
+  showExport = true,
+  showShare = false,
+  voice,
+  isPlaying = false,
+  onTogglePlay,
+  canPlay = false,
+}) => {
   const { user } = useAuth();
   return (
   <div style={{
@@ -36,10 +87,29 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voi
       <TrafficLight color="#28C840" action="maximize-app" />
     </div>
 
-    <p style={{ fontWeight: 500, WebkitAppRegion: 'drag' }}>Kōdan</p>
+    <CenterSlot voice={voice} />
 
     <div style={{ display: 'flex', gap: 8, marginRight: 12, alignItems: 'center', WebkitAppRegion: 'no-drag' }}>
-      {voice?.active ? <VoiceIndicator mode={voice.mode} levels={voice.levels} /> : null}
+      {onTogglePlay && (
+        <button
+          onClick={onTogglePlay}
+          disabled={!canPlay && !isPlaying}
+          style={{
+            backgroundColor: '#fff',
+            color: canPlay || isPlaying ? '#404040' : '#B0B0B0',
+            paddingLeft: 8,
+            paddingRight: 8,
+            border: '1px solid #D9D9D9',
+            borderRadius: 4,
+            paddingTop: 4,
+            paddingBottom: 4,
+            cursor: canPlay || isPlaying ? 'pointer' : 'not-allowed',
+            WebkitAppRegion: 'no-drag',
+          }}
+        >
+          {isPlaying ? 'Pause' : 'Play'}
+        </button>
+      )}
       {showShare && (
         <button
           onClick={onShare}
