@@ -6,6 +6,7 @@ const { createPool } = require("./db/pool");
 const createAuthRouter = require("./routes/auth");
 const createRequireAuth = require("./middleware/requireAuth");
 const createProjectsRouter = require("./routes/projects");
+const createVoiceRouter = require("./routes/voice");
 
 const port = Number(process.env.PORT) || 3000;
 
@@ -34,6 +35,7 @@ async function main() {
     const requireAuth = createRequireAuth(pool);
     app.use("/auth", createAuthRouter(pool, requireAuth));
     app.use("/projects", createProjectsRouter(pool, requireAuth));
+    app.use("/voice", createVoiceRouter(pool, requireAuth));
   }
 
   const server = app.listen(port, () => {

@@ -10,6 +10,8 @@ import ComposeLayout from './ComposeLayout';
 import ShareModal from './ShareModal';
 import ProjectLoadingSkeleton from './ProjectLoadingSkeleton';
 import { composeSceneToPng } from '../../lib/composeScene';
+import useVoicePrompt from '../../hooks/useVoicePrompt';
+import VoiceIndicator from '../voice/VoiceIndicator';
 
 const SECONDS_PER_FRAME = 2;
 
@@ -110,6 +112,7 @@ const ProjectComponent = ({ projectId }) => {
 
   // Prompt
   const [prompt, setPrompt] = useState('');
+  const [promptFocusToken, setPromptFocusToken] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Fal models + per-scene picks
@@ -119,12 +122,16 @@ const ProjectComponent = ({ projectId }) => {
   const [falVideoModels, setFalVideoModels] = useState([]);
   const [defaultFalVideoModelId, setDefaultFalVideoModelId] = useState('fal-ai/happy-horse/image-to-video');
 
-  // Multi-select for "Make Video Frame"
-  const [secondarySelectedScene, setSecondarySelectedScene] = useState(null);
+  // Multi-select for "Make Video Frame" — array of scene numbers (1-based)
+  // that are *additionally* selected via shift-click; the primary
+  // `selectedScene` is always also part of the visual multi-selection.
+  const [multiSelectedScenes, setMultiSelectedScenes] = useState([]);
 
   // Video frame state (per-scene fields, hydrated when selectedScene changes)
   const [videoDuration, setVideoDuration] = useState(4);
   const [creatingVideo, setCreatingVideo] = useState(false);
+  const [videoError, setVideoError] = useState(null);
+  const [videoStatusMessage, setVideoStatusMessage] = useState('');
 
   // References
   const [references, setReferences] = useState([]);
@@ -511,6 +518,7 @@ const ProjectComponent = ({ projectId }) => {
       setVoiceText('');
       setPrompt('');
       setSelectedScene(insertAt + 1);
+      setPromptFocusToken((t) => t + 1);
 
       try {
         await reorderFrames(newOrder);
@@ -559,8 +567,25 @@ const ProjectComponent = ({ projectId }) => {
         return;
       }
 
+      if (
+        (event.key === 'Backspace' || event.key === 'Delete') &&
+        !isInputFocused &&
+        multiSelectedScenes.length >= 1
+      ) {
+        event.preventDefault();
+        const all = Array.from(
+          new Set([selectedScene, ...multiSelectedScenes]),
+        ).sort((a, b) => a - b);
+        const ok = window.confirm(
+          `Delete ${all.length} selected frame${all.length === 1 ? '' : 's'}?`,
+        );
+        if (ok) deleteScenesBulk(all);
+        return;
+      }
+
       if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && !isInputFocused) {
         setVoiceText('');
+        setMultiSelectedScenes([]);
         setPressedScene(selectedScene);
         setTimeout(() => {
           setSelectedScene((prevScene) => {
@@ -581,6 +606,7 @@ const ProjectComponent = ({ projectId }) => {
     copyImageToClipboard,
     pasteFromClipboardToReferences,
     duplicateAsEditFrame,
+    multiSelectedScenes,
   ]);
 
   // Click anywhere outside the selected image clears the selection.
@@ -611,10 +637,19 @@ const ProjectComponent = ({ projectId }) => {
 
   const loadThumbnail = (thumbnailPath) =>
     new Promise((resolve) => {
+      const path = String(thumbnailPath || '');
+      // Video URLs can't preload through `new Image()` — `onerror` would clear
+      // the thumbnail, hiding successful video generations. Set them directly.
+      if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(path)) {
+        setThumbnail(path);
+        setVideoKey(Date.now());
+        resolve(true);
+        return;
+      }
       const img = new Image();
-      img.src = thumbnailPath;
+      img.src = path;
       img.onload = () => {
-        setThumbnail(thumbnailPath);
+        setThumbnail(path);
         setAspectRatio(img.width / img.height);
         setImgW(img.width);
         setImgH(img.height);
@@ -700,29 +735,40 @@ const ProjectComponent = ({ projectId }) => {
   };
 
   /**
-   * Caption that flows over to a video frame from its two source frames:
-   * - if both have the same caption → that one
-   * - if only one has a caption → that one
-   * - if both differ → first on line 1, second on line 2
+   * Merge the captions of N source frames into the new video frame:
+   * - de-dupe identical captions
+   * - drop empties
+   * - join the rest with newlines, in scene order
    */
-  const mergeCaptions = (a, b) => {
-    const ca = (a?.captionSettings?.caption || '').trim();
-    const cb = (b?.captionSettings?.caption || '').trim();
-    if (ca && cb) return ca === cb ? ca : `${ca}\n${cb}`;
-    return ca || cb || '';
+  const mergeCaptionsFromScenes = (scenes) => {
+    const seen = new Set();
+    const lines = [];
+    for (const s of scenes) {
+      const c = (s?.captionSettings?.caption || '').trim();
+      if (!c || seen.has(c)) continue;
+      seen.add(c);
+      lines.push(c);
+    }
+    return lines.join('\n');
   };
 
   const makeVideoFrame = async () => {
     if (!isRemote || !authToken || !projectId || !projectData) return;
-    if (!secondarySelectedScene) return;
-    const aIdx = Math.min(selectedScene, secondarySelectedScene) - 1;
-    const bIdx = Math.max(selectedScene, secondarySelectedScene) - 1;
-    const a = projectData.scenes[aIdx];
-    const b = projectData.scenes[bIdx];
-    if (!a?.thumbnail || !b?.thumbnail) {
-      window.alert('Both selected frames need a generated visual first.');
+    // Combined selection set, in scene order.
+    const allSelectedNumbers = Array.from(
+      new Set([selectedScene, ...multiSelectedScenes]),
+    ).sort((a, b) => a - b);
+    if (allSelectedNumbers.length < 2) return;
+
+    const sourceScenes = allSelectedNumbers.map(
+      (n) => projectData.scenes[n - 1],
+    );
+    if (sourceScenes.some((s) => !s?.thumbnail)) {
+      window.alert('Every selected frame needs a generated visual first.');
       return;
     }
+    const lastIdx = allSelectedNumbers[allSelectedNumbers.length - 1] - 1;
+
     try {
       const addRes = await fetch(
         apiUrl(`/projects/${encodeURIComponent(projectId)}/frames`),
@@ -733,14 +779,16 @@ const ProjectComponent = ({ projectId }) => {
       const newFrameId = addBody.frame?.id;
       if (!newFrameId) throw new Error('Server did not return a frame id');
 
-      const mergedCaption = mergeCaptions(a, b);
+      const mergedCaption = mergeCaptionsFromScenes(sourceScenes);
       const sourceCaptionSettings =
-        a.captionSettings || b.captionSettings || REMOTE_CAPTION_DEFAULT;
+        sourceScenes.find((s) => s.captionSettings)?.captionSettings ||
+        REMOTE_CAPTION_DEFAULT;
       const captionForFrame = { ...sourceCaptionSettings, caption: mergedCaption };
+      const referenceUrls = sourceScenes.map((s) => s.thumbnail);
 
       await patchFrame(newFrameId, {
         model: defaultFalVideoModelId,
-        reference_urls: [a.thumbnail, b.thumbnail],
+        reference_urls: referenceUrls,
         meta: {
           kind: 'video',
           durationSeconds: 4,
@@ -750,7 +798,7 @@ const ProjectComponent = ({ projectId }) => {
 
       const currentIds = projectData.scenes.map((s) => s.frameId);
       const newOrder = currentIds.slice();
-      const insertAt = bIdx + 1;
+      const insertAt = lastIdx + 1;
       newOrder.splice(insertAt, 0, newFrameId);
 
       // Optimistic local update.
@@ -761,7 +809,7 @@ const ProjectComponent = ({ projectId }) => {
           id: newFrameId,
           thumbnail: '',
           positivePrompt: '',
-          references: [a.thumbnail, b.thumbnail],
+          references: referenceUrls,
           model: defaultFalVideoModelId,
           voiceline: '',
           speaker: 'Narrator',
@@ -782,7 +830,88 @@ const ProjectComponent = ({ projectId }) => {
         console.error('Reorder after make-video failed:', e);
       }
 
-      setSecondarySelectedScene(null);
+      setMultiSelectedScenes([]);
+      setSelectedScene(insertAt + 1);
+      refetchRemoteProject().catch(() => {});
+    } catch (e) {
+      console.error(e);
+      window.alert(e.message || 'Could not create video frame');
+    }
+  };
+
+  /**
+   * Same flow as makeVideoFrame but sourced from a single image — turns the
+   * current frame's visual into a new video frame inserted right after it.
+   * The sidebar shortcut for "animate this image" without shift-selecting a pair.
+   */
+  const makeVideoFrameFromCurrent = async () => {
+    if (!isRemote || !authToken || !projectId || !projectData) return;
+    const idx = selectedScene - 1;
+    const source = projectData.scenes[idx];
+    if (!source?.thumbnail) {
+      window.alert('Generate a visual on this frame first.');
+      return;
+    }
+    try {
+      const addRes = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(projectId)}/frames`),
+        { method: 'POST', headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' } },
+      );
+      const addBody = await addRes.json().catch(() => ({}));
+      if (!addRes.ok) throw new Error(addBody.error || 'Add frame failed');
+      const newFrameId = addBody.frame?.id;
+      if (!newFrameId) throw new Error('Server did not return a frame id');
+
+      const captionForFrame = {
+        ...(source.captionSettings || REMOTE_CAPTION_DEFAULT),
+        caption: (source.captionSettings?.caption || '').trim(),
+      };
+      const referenceUrls = [source.thumbnail];
+
+      await patchFrame(newFrameId, {
+        model: defaultFalVideoModelId,
+        reference_urls: referenceUrls,
+        meta: {
+          kind: 'video',
+          durationSeconds: 4,
+          captionSettings: captionForFrame,
+        },
+      });
+
+      const currentIds = projectData.scenes.map((s) => s.frameId);
+      const newOrder = currentIds.slice();
+      const insertAt = idx + 1;
+      newOrder.splice(insertAt, 0, newFrameId);
+
+      setProjectData((prev) => {
+        if (!prev) return prev;
+        const placeholder = {
+          frameId: newFrameId,
+          id: newFrameId,
+          thumbnail: '',
+          positivePrompt: '',
+          references: referenceUrls,
+          model: defaultFalVideoModelId,
+          voiceline: '',
+          speaker: 'Narrator',
+          baseModel: '',
+          selectedLora: '',
+          kind: 'video',
+          durationSeconds: 4,
+          captionSettings: captionForFrame,
+        };
+        const next = prev.scenes.slice();
+        next.splice(insertAt, 0, placeholder);
+        return { ...prev, scenes: next };
+      });
+
+      try {
+        await reorderFrames(newOrder);
+      } catch (e) {
+        console.error('Reorder after make-video-from-current failed:', e);
+      }
+
+      setMultiSelectedScenes([]);
       setSelectedScene(insertAt + 1);
       refetchRemoteProject().catch(() => {});
     } catch (e) {
@@ -801,7 +930,12 @@ const ProjectComponent = ({ projectId }) => {
       return;
     }
     setCreatingVideo(true);
+    setVideoError(null);
+    setVideoStatusMessage(
+      `Sending request to ${selectedFalModel || defaultFalVideoModelId}…`,
+    );
     try {
+      setVideoStatusMessage('Generating video on fal.ai (this can take 30–90s)…');
       const res = await fetch(
         apiUrl(
           `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(scene.frameId)}/generate-video`,
@@ -827,15 +961,19 @@ const ProjectComponent = ({ projectId }) => {
           body.error ||
           (res.status === 402
             ? `Not enough tokens (need ${required ?? '?'}; you have ${body.tokens ?? '?'})`
-            : `Video generation failed (${res.status})`);
+            : `Video generation failed (HTTP ${res.status})`);
         throw new Error(msg);
       }
+      setVideoStatusMessage('Loading clip…');
       const pd = await refetchRemoteProject();
       const url = body.frame?.result || pd?.scenes?.[selectedScene - 1]?.thumbnail;
-      if (url) await loadThumbnail(url);
+      if (!url) throw new Error('Server did not return a video URL.');
+      await loadThumbnail(url);
+      setVideoStatusMessage('');
     } catch (e) {
       console.error(e);
-      window.alert(e.message || 'Video generation failed');
+      setVideoError(String(e.message || 'Video generation failed'));
+      setVideoStatusMessage('');
     } finally {
       setCreatingVideo(false);
     }
@@ -962,6 +1100,8 @@ const ProjectComponent = ({ projectId }) => {
 
         setLocalCaption(currentScene.captionSettings?.caption || '');
         setVideoDuration(Number(currentScene.durationSeconds) || 4);
+        setVideoError(null);
+        setVideoStatusMessage('');
         setIsTransitioning(false);
       }, 50);
     }
@@ -1202,6 +1342,21 @@ const ProjectComponent = ({ projectId }) => {
     updateScenePrompts(newPrompt);
   };
 
+  const handleVoicePrompt = useCallback(
+    (text) => {
+      const trimmed = String(text || '').trim();
+      if (!trimmed) return;
+      setPrompt(trimmed);
+      updateScenePrompts(trimmed);
+    },
+    [updateScenePrompts],
+  );
+
+  const voice = useVoicePrompt({
+    onPrompt: handleVoicePrompt,
+    getAuthToken: () => authToken,
+  });
+
   const handleFalModelChange = (event) => {
     const newId = event.target.value;
     setSelectedFalModel(newId);
@@ -1261,6 +1416,34 @@ const ProjectComponent = ({ projectId }) => {
         }
       })
       .catch((error) => console.error('Failed to delete scene:', error));
+  };
+
+  const deleteScenesBulk = async (sceneNumbers) => {
+    if (!authToken || !projectId || !projectData) return;
+    const ids = Array.from(new Set(sceneNumbers))
+      .map((n) => projectData.scenes[n - 1]?.frameId)
+      .filter(Boolean);
+    if (ids.length === 0) return;
+    if (projectData.scenes.length - ids.length < 1) {
+      window.alert('Keep at least one scene.');
+      return;
+    }
+    for (const frameId of ids) {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await fetch(
+        apiUrl(
+          `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(frameId)}`,
+        ),
+        { method: 'DELETE', headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/json' } },
+      );
+      if (!res.ok && res.status !== 204) {
+        const body = await res.json().catch(() => ({}));
+        console.error('Bulk delete failed for', frameId, body.error || res.status);
+      }
+    }
+    setMultiSelectedScenes([]);
+    setSelectedScene((prev) => Math.max(1, prev - ids.length + 1));
+    await refetchRemoteProject();
   };
 
   const handleOpenFolder = (_sceneIndex) => {
@@ -1653,6 +1836,9 @@ const ProjectComponent = ({ projectId }) => {
         onGenerate: isVideoFrame
           ? () => generateVideoForCurrentFrame()
           : () => startGenerationForScene(selectedScene),
+        showMakeVideoFromCurrent: !isVideoFrame && Boolean(currentScene?.thumbnail),
+        onMakeVideoFromCurrent: makeVideoFrameFromCurrent,
+        makeVideoFromCurrentDisabled: !currentScene?.thumbnail,
       }}
       centerStageProps={{
         aspectRatio: projectAspectRatio,
@@ -1682,6 +1868,10 @@ const ProjectComponent = ({ projectId }) => {
           caption: localCaption,
           captionSettings,
           isVideoFrame,
+          videoStatusMessage,
+          videoError,
+          onClearVideoError: () => setVideoError(null),
+          promptFocusToken,
         },
         voiceLineProps: {
           voiceText,
@@ -1736,16 +1926,22 @@ const ProjectComponent = ({ projectId }) => {
         onSceneMouseUp: (sceneNumber, event) => {
           setIsMouseDown(false);
           if (pressedScene === sceneNumber) {
-            if (event?.shiftKey && sceneNumber !== selectedScene) {
-              setSecondarySelectedScene(sceneNumber);
+            if (event?.shiftKey) {
+              if (sceneNumber !== selectedScene) {
+                setMultiSelectedScenes((prev) =>
+                  prev.includes(sceneNumber)
+                    ? prev.filter((n) => n !== sceneNumber)
+                    : [...prev, sceneNumber],
+                );
+              }
             } else {
               setSelectedScene(sceneNumber);
-              setSecondarySelectedScene(null);
+              setMultiSelectedScenes([]);
             }
           }
           setPressedScene(null);
         },
-        secondarySelectedScene,
+        multiSelectedScenes,
         onMakeVideoFrame: makeVideoFrame,
         onSceneMouseLeave: () => {
           if (isMouseDown) {
@@ -1771,6 +1967,9 @@ const ProjectComponent = ({ projectId }) => {
         authToken={authToken}
         onClose={() => setShareOpen(false)}
       />
+    ) : null}
+    {voice.active ? (
+      <VoiceIndicator status={voice.status} levels={voice.levels} />
     ) : null}
     </>
   );

@@ -32,16 +32,22 @@ const REFERENCE_MIME_EXT = {
   "image/png": ".png",
   "image/webp": ".webp",
   "image/gif": ".gif",
+  // Video references — for video-frame inputs (image-to-video / video-to-video
+  // models on fal). Most i2v models accept image_url; video-aware models
+  // (e.g. wan-vace, kling extend, runway gen3) accept video_url.
+  "video/mp4": ".mp4",
+  "video/quicktime": ".mov",
+  "video/webm": ".webm",
 };
 
 const referenceUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (REFERENCE_MIME_EXT[String(file.mimetype || "").toLowerCase()]) {
       cb(null, true);
     } else {
-      cb(new Error("Only JPEG, PNG, WebP, or GIF images are allowed"));
+      cb(new Error("Only JPEG, PNG, WebP, GIF, MP4, MOV, or WebM are allowed"));
     }
   },
 });

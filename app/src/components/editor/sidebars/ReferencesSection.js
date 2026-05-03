@@ -68,12 +68,15 @@ const addMoreStyle = {
   cursor: 'pointer',
 };
 
+const isVideoUrl = (url) => /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(String(url || ''));
+
 const ReferencesSection = ({
   references = [],
   onAddFiles,
   onAddUrl,
   onRemove,
   uploading,
+  acceptVideos = false,
 }) => {
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef(null);
@@ -83,14 +86,16 @@ const ReferencesSection = ({
     inputRef.current?.click();
   };
 
+  const matcher = acceptVideos
+    ? (f) => /^image\/|^video\//.test(f.type)
+    : (f) => /^image\//.test(f.type);
+
   const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
     if (uploading) return;
-    const files = Array.from(e.dataTransfer.files || []).filter((f) =>
-      /^image\//.test(f.type),
-    );
+    const files = Array.from(e.dataTransfer.files || []).filter(matcher);
     if (files.length) {
       onAddFiles?.(files);
       return;
@@ -102,7 +107,7 @@ const ReferencesSection = ({
   };
 
   const handlePick = (e) => {
-    const files = Array.from(e.target.files || []);
+    const files = Array.from(e.target.files || []).filter(matcher);
     if (files.length) onAddFiles?.(files);
     e.target.value = '';
   };
@@ -114,7 +119,7 @@ const ReferencesSection = ({
       <SectionHeader icon="icons/Picture.svg" label="References" />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
-        <FieldLabel>REFERENCE IMAGES</FieldLabel>
+        <FieldLabel>{acceptVideos ? 'REFERENCE FRAMES' : 'REFERENCE IMAGES'}</FieldLabel>
         <div
           style={dropZoneStyle(dragActive, uploading, hasItems)}
           onDragOver={(e) => {
@@ -133,16 +138,26 @@ const ReferencesSection = ({
           {uploading && !hasItems ? (
             'Uploading…'
           ) : !hasItems ? (
-            'Drop images or upload'
+            acceptVideos ? 'Drop images or videos' : 'Drop images or upload'
           ) : (
             <>
               {references.map((url) => (
                 <div key={url} style={thumbStyle}>
-                  <img
-                    src={url}
-                    alt=""
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
+                  {isVideoUrl(url) ? (
+                    <video
+                      src={url}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    />
+                  ) : (
+                    <img
+                      src={url}
+                      alt=""
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  )}
                   <button
                     type="button"
                     style={removeBtnStyle}
@@ -172,7 +187,7 @@ const ReferencesSection = ({
           <input
             ref={inputRef}
             type="file"
-            accept="image/*"
+            accept={acceptVideos ? 'image/*,video/*' : 'image/*'}
             multiple
             style={{ display: 'none' }}
             onChange={handlePick}

@@ -11,6 +11,7 @@ const SceneThumbnail = ({
   innerRef,
   isSelected,
   isMultiSelected,
+  hideDeleteBubble,
   isVideoFrame,
   isPressed,
   isMouseDown,
@@ -90,98 +91,79 @@ const SceneThumbnail = ({
       onMouseUp={(e) => onMouseUp?.(e)}
       onMouseLeave={onMouseLeave}
     >
-      {showActionIcons && (
-        <>
-          <button
-            type="button"
-            aria-label="Delete scene"
-            onMouseDown={(e) => e.stopPropagation()}
-            onMouseUp={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); onDelete(e.shiftKey); }}
-            style={{
-              position: 'absolute',
-              top: 21,
-              right: 1,
-              padding: 11,
-              border: 0,
-              background: 'transparent',
-              cursor: 'pointer',
-              opacity: isSelected ? 1 : 0,
-              pointerEvents: isSelected ? 'auto' : 'none',
-              transform: `scale(${isSelected ? 1 : 0})`,
-              transition: 'opacity 0.25s ease-out, transform 0.25s ease-out',
-              zIndex: 10,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Img
-              src="./icons/Minus.svg"
-              style={{ width: 18, height: 18, pointerEvents: 'none' }}
-            />
-          </button>
-          {canExportClip && (
-            <button
-              type="button"
-              aria-label="Open scene folder"
-              onMouseDown={(e) => e.stopPropagation()}
-              onMouseUp={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); onOpenFolder(); }}
-              style={{
-                position: 'absolute',
-                top: 21,
-                right: 25,
-                padding: 11,
-                border: 0,
-                background: 'transparent',
-                cursor: 'pointer',
-                opacity: isSelected ? 1 : 0,
-                pointerEvents: isSelected ? 'auto' : 'none',
-                transform: `scale(${isSelected ? 1 : 0})`,
-                transition: 'opacity 0.25s ease-out, transform 0.25s ease-out',
-                zIndex: 10,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Img
-                src="./icons/Folder.svg"
-                style={{ width: 18, height: 18, pointerEvents: 'none' }}
-              />
-            </button>
-          )}
-        </>
+      {showActionIcons && !hideDeleteBubble && (
+        <button
+          type="button"
+          aria-label="Delete scene"
+          onMouseDown={(e) => e.stopPropagation()}
+          onMouseUp={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onDelete(e.shiftKey); }}
+          style={{
+            position: 'absolute',
+            top: 21,
+            right: 1,
+            padding: 11,
+            border: 0,
+            background: 'transparent',
+            cursor: 'pointer',
+            opacity: isSelected ? 1 : 0,
+            pointerEvents: isSelected ? 'auto' : 'none',
+            transform: `scale(${isSelected ? 1 : 0})`,
+            transition: 'opacity 0.25s ease-out, transform 0.25s ease-out',
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Img
+            src="./icons/Minus.svg"
+            style={{ width: 18, height: 18, pointerEvents: 'none' }}
+          />
+        </button>
       )}
       <div style={shapeStyle}>
-        {scene.thumbnail != null && String(scene.thumbnail).trim() !== '' ? (
-          <Img
-            src={`${String(scene.thumbnail).trim()}?t=${thumbnailTimestamp || ''}`}
-            loader={
-              <div style={{
+        {(() => {
+          const raw = String(scene.thumbnail || '').trim();
+          if (!raw) return null;
+          const isVideoUrl =
+            isVideoFrame || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(raw);
+          if (isVideoUrl) {
+            // First-frame poster for the strip — muted, never plays, just
+            // shows the start of the clip so the user sees what frame this is.
+            return (
+              <video
+                src={raw}
+                muted
+                playsInline
+                preload="metadata"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'block',
+                  objectFit: 'cover',
+                  backgroundColor: '#F2F2F2',
+                  pointerEvents: 'none',
+                }}
+              />
+            );
+          }
+          return (
+            <Img
+              src={`${raw}?t=${thumbnailTimestamp || ''}`}
+              loader={<div style={{ width: '100%', height: '100%', backgroundColor: '#F2F2F2' }} />}
+              unloader={<div style={{ width: '100%', height: '100%', backgroundColor: '#F2F2F2' }} />}
+              style={{
                 width: '100%',
                 height: '100%',
+                display: 'block',
+                objectFit: 'cover',
                 backgroundColor: '#F2F2F2',
-              }} />
-            }
-            unloader={
-              <div style={{
-                width: '100%',
-                height: '100%',
-                backgroundColor: '#F2F2F2',
-              }} />
-            }
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'block',
-              objectFit: 'cover',
-              backgroundColor: '#F2F2F2',
-              pointerEvents: 'none',
-            }}
-          />
-        ) : null}
+                pointerEvents: 'none',
+              }}
+            />
+          );
+        })()}
       </div>
     </div>
   );

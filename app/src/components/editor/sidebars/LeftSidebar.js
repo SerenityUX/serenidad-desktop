@@ -35,6 +35,9 @@ const LeftSidebar = ({
   generateLabel,
   generateDisabled,
   onGenerate,
+  showMakeVideoFromCurrent,
+  onMakeVideoFromCurrent,
+  makeVideoFromCurrentDisabled,
 }) => (
   <div
     id="left-bar"
@@ -81,6 +84,7 @@ const LeftSidebar = ({
         onRemove={onRemoveReference}
         uploading={referencesUploading}
         modelSupportsReferences={modelSupportsReferences}
+        acceptVideos={videoMode}
       />
 
       <DurationSection
@@ -94,6 +98,13 @@ const LeftSidebar = ({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
       <Divider />
       <GenerateVisualsButton label={generateLabel} disabled={generateDisabled} onClick={onGenerate} />
+      {showMakeVideoFromCurrent && (
+        <GenerateVisualsButton
+          label="Make Video Frame"
+          disabled={makeVideoFromCurrentDisabled}
+          onClick={onMakeVideoFromCurrent}
+        />
+      )}
     </div>
   </div>
 );

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const FIELD_HEIGHT = 64;
 
@@ -98,9 +98,19 @@ const ScenePlaceholder = ({
   onRemoveReference,
   referencesUploading,
   generateLabel,
+  promptFocusToken,
 }) => {
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef(null);
+  const promptRef = useRef(null);
+
+  useEffect(() => {
+    if (promptFocusToken == null || promptFocusToken === 0) return;
+    const el = promptRef.current;
+    if (!el) return;
+    el.focus();
+    try { el.select(); } catch { /* ignore */ }
+  }, [promptFocusToken]);
 
   const openPicker = () => {
     if (referencesUploading) return;
@@ -165,6 +175,7 @@ const ScenePlaceholder = ({
             <div style={fieldColumnStyle}>
               <p className="labelTop">PROMPT</p>
               <textarea
+                ref={promptRef}
                 value={prompt}
                 style={promptStyle}
                 onChange={onPromptChange}
