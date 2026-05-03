@@ -156,7 +156,9 @@ const FAL_VIDEO_MODELS = [
     // Reference-to-video, not image-to-video: accepts an array of reference
     // images that all condition the output. No start/end semantics.
     // Docs: https://fal.ai/models/alibaba/happy-horse/reference-to-video
-    id: "fal-ai/alibaba/happy-horse/reference-to-video",
+    // The fal id is the path after /models/ — no `fal-ai/` prefix because
+    // it's an Alibaba-published model, not a fal-owned endpoint.
+    id: "alibaba/happy-horse/reference-to-video",
     label: "Happy Horse (reference-to-video)",
     costCents: 50,
     family: "happy-horse",
@@ -188,7 +190,7 @@ const FAL_VIDEO_MODELS = [
 // Default for new video frames — Happy Horse (reference-to-video) accepts an
 // array of references and conditions the whole clip on them, which matches
 // the shift-select-N-frames-then-Make-Video-Frame flow.
-const DEFAULT_VIDEO_MODEL_ID = "fal-ai/alibaba/happy-horse/reference-to-video";
+const DEFAULT_VIDEO_MODEL_ID = "alibaba/happy-horse/reference-to-video";
 
 /* Hidden aliases keep frames stored against retired ids resolvable without exposing them in the picker. */
 const HIDDEN_ALIASES = [
@@ -210,7 +212,7 @@ const HIDDEN_ALIASES = [
     supportsReferences: true,
     supportsEndFrame: false,
     referenceImagesKey: "reference_image_urls",
-    aliasOf: "fal-ai/alibaba/happy-horse/reference-to-video",
+    aliasOf: "alibaba/happy-horse/reference-to-video",
   },
 ];
 

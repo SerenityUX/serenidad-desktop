@@ -60,28 +60,26 @@ const StyleSection = ({
               </option>
             ))}
           </select>
-          {activeFalModel && (
-            <div style={helperStyle}>
-              {(() => {
-                const isVideoModel = Object.prototype.hasOwnProperty.call(
-                  activeFalModel,
-                  'supportsEndFrame',
-                );
-                if (isVideoModel) {
-                  if (activeFalModel.supportsEndFrame) {
-                    return 'Start + end frame — prompt guides the motion between them';
-                  }
-                  if (activeFalModel.acceptsMultipleReferences) {
-                    return 'Reference-to-video — all refs condition the clip; prompt sets the action';
-                  }
-                  return 'Start frame only — extra refs will be ignored';
-                }
-                return activeFalModel.supportsReferences
-                  ? 'Supports references'
-                  : 'Ignores references';
-              })()}
-            </div>
-          )}
+          {(() => {
+            if (!activeFalModel) return null;
+            const isVideoModel = Object.prototype.hasOwnProperty.call(
+              activeFalModel,
+              'supportsEndFrame',
+            );
+            let msg = null;
+            if (isVideoModel) {
+              if (activeFalModel.supportsEndFrame) {
+                msg = 'Start + end frame — prompt guides the motion between them';
+              } else if (!activeFalModel.acceptsMultipleReferences) {
+                msg = 'Start frame only — extra refs will be ignored';
+              }
+            } else {
+              msg = activeFalModel.supportsReferences
+                ? 'Supports references'
+                : 'Ignores references';
+            }
+            return msg ? <div style={helperStyle}>{msg}</div> : null;
+          })()}
         </div>
       )}
 
