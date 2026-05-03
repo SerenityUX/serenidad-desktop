@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiUrl } from '../config';
 
 const TRIGGER_KEY = '`';
-const BAR_COUNT = 5;
-const SILENT_LEVELS = new Array(BAR_COUNT).fill(0);
+const DOT_COUNT = 3;
+const SILENT_LEVELS = new Array(DOT_COUNT).fill(0);
+const MIC_SENSITIVITY = 7;
 
 const isEditableTarget = (el) => {
   if (!el) return false;
@@ -36,11 +37,18 @@ const playBubble = (audioCtx) => {
 
 /**
  * Hold-to-talk hook: hold backtick to record, release to send.
- * Calls `onPrompt(text)` with the transcribed/cleaned prompt; returns indicator state.
+ * Returns { active, mode: 'listening'|'loading', levels }.
  */
-export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPrompt }) {
+export default function useVoicePrompt({
+  onPrompt,
+  getAuthToken,
+  getCurrentPrompt,
+  getContext,
+  getModelId,
+  getReferences,
+}) {
   const [active, setActive] = useState(false);
-  const [status, setStatus] = useState('');
+  const [mode, setMode] = useState('listening');
   const [levels, setLevels] = useState(SILENT_LEVELS);
 
   const recorderRef = useRef(null);
@@ -56,6 +64,9 @@ export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPromp
   const onPromptRef = useRef(onPrompt);
   const getAuthTokenRef = useRef(getAuthToken);
   const getCurrentPromptRef = useRef(getCurrentPrompt);
+  const getContextRef = useRef(getContext);
+  const getModelIdRef = useRef(getModelId);
+  const getReferencesRef = useRef(getReferences);
 
   useEffect(() => {
     onPromptRef.current = onPrompt;
@@ -66,6 +77,15 @@ export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPromp
   useEffect(() => {
     getCurrentPromptRef.current = getCurrentPrompt;
   }, [getCurrentPrompt]);
+  useEffect(() => {
+    getContextRef.current = getContext;
+  }, [getContext]);
+  useEffect(() => {
+    getModelIdRef.current = getModelId;
+  }, [getModelId]);
+  useEffect(() => {
+    getReferencesRef.current = getReferences;
+  }, [getReferences]);
 
   const cleanupRecording = useCallback(() => {
     if (rafRef.current) {
@@ -87,7 +107,7 @@ export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPromp
 
   const dismiss = useCallback(() => {
     setActive(false);
-    setStatus('');
+    setMode('listening');
     setLevels(SILENT_LEVELS);
   }, []);
 
@@ -95,47 +115,95 @@ export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPromp
     async (blob) => {
       const token = getAuthTokenRef.current?.();
       if (!token) {
-        setStatus('Not signed in');
-        setTimeout(dismiss, 1200);
+        dismiss();
         return;
       }
-      setStatus('Transcribing…');
+      setMode('loading');
       try {
         const fd = new FormData();
         fd.append('audio', blob, 'voice.webm');
         const currentPrompt = getCurrentPromptRef.current?.() || '';
         if (currentPrompt) fd.append('current_prompt', currentPrompt);
+        const context = getContextRef.current?.() || '';
+        if (context) fd.append('context', context);
+        const modelId = getModelIdRef.current?.() || '';
+        if (modelId) fd.append('model_id', modelId);
+        const refs = getReferencesRef.current?.();
+        if (Array.isArray(refs) && refs.length) {
+          fd.append('references', JSON.stringify(refs));
+        }
+
         const res = await fetch(apiUrl('/voice/prompt'), {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
           body: fd,
         });
-        const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          throw new Error(data.error || `HTTP ${res.status}`);
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.error || `HTTP ${res.status}`);
         }
-        if (data.prompt) {
-          onPromptRef.current?.(data.prompt);
-        }
-        if (data.audio_url) {
-          try {
-            if (responseAudioRef.current) {
-              responseAudioRef.current.pause();
+        if (!res.body) throw new Error('No response body');
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let accPrompt = '';
+        let promptStarted = false;
+        let audioPlayed = false;
+
+        const handleEvent = (event, data) => {
+          if (event === 'prompt_chunk' && typeof data?.delta === 'string') {
+            accPrompt += data.delta;
+            promptStarted = true;
+            onPromptRef.current?.(accPrompt);
+          } else if (event === 'prompt_done' && typeof data?.text === 'string') {
+            accPrompt = data.text;
+            onPromptRef.current?.(accPrompt);
+          } else if (event === 'response_audio' && data?.url && !audioPlayed) {
+            audioPlayed = true;
+            try {
+              if (responseAudioRef.current) responseAudioRef.current.pause();
+              const audio = new Audio(data.url);
+              audio.volume = 0.9;
+              responseAudioRef.current = audio;
+              audio.play().catch(() => {});
+            } catch (e) {
+              console.warn('response audio play failed', e);
             }
-            const audio = new Audio(data.audio_url);
-            audio.volume = 0.9;
-            responseAudioRef.current = audio;
-            audio.play().catch(() => {});
-          } catch (e) {
-            console.warn('response audio play failed', e);
+          } else if (event === 'error') {
+            console.error('voice stream error:', data?.error);
+          }
+        };
+
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let sepIdx;
+          while ((sepIdx = buffer.indexOf('\n\n')) >= 0) {
+            const raw = buffer.slice(0, sepIdx);
+            buffer = buffer.slice(sepIdx + 2);
+            let event = 'message';
+            let dataStr = '';
+            for (const line of raw.split('\n')) {
+              if (line.startsWith('event:')) event = line.slice(6).trim();
+              else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+            }
+            if (!dataStr) continue;
+            try {
+              handleEvent(event, JSON.parse(dataStr));
+            } catch {
+              /* ignore malformed event */
+            }
           }
         }
-        setStatus(data.response || 'Got it.');
-        setTimeout(dismiss, 1400);
+        if (!promptStarted && !accPrompt) {
+          // No prompt arrived (probably an error); just bail silently.
+        }
+        dismiss();
       } catch (e) {
-        console.error(e);
-        setStatus(`Error: ${e.message}`);
-        setTimeout(dismiss, 1800);
+        console.error('voice prompt error:', e);
+        dismiss();
       }
     },
     [dismiss],
@@ -146,25 +214,23 @@ export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPromp
     isRecordingRef.current = true;
     pendingStopRef.current = false;
     setActive(true);
-    setStatus('Listening…');
+    setMode('listening');
     setLevels(SILENT_LEVELS);
 
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
-      console.error(e);
-      setStatus('Mic blocked');
-      setTimeout(dismiss, 1500);
+      console.error('mic blocked', e);
       isRecordingRef.current = false;
+      dismiss();
       return;
     }
     if (pendingStopRef.current) {
       stream.getTracks().forEach((t) => t.stop());
       isRecordingRef.current = false;
       pendingStopRef.current = false;
-      setStatus('Too short');
-      setTimeout(dismiss, 900);
+      dismiss();
       return;
     }
     streamRef.current = stream;
@@ -189,7 +255,7 @@ export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPromp
         sumSq += v * v;
       }
       const rms = Math.sqrt(sumSq / buf.length);
-      const norm = Math.min(1, rms * 3.2);
+      const norm = Math.min(1, rms * MIC_SENSITIVITY);
       setLevels((prev) => {
         const next = prev.slice(1);
         next.push(norm);
@@ -217,9 +283,8 @@ export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPromp
       }
     }
     if (!recorder) {
-      setStatus('Recorder unsupported');
-      setTimeout(dismiss, 1500);
       cleanupRecording();
+      dismiss();
       return;
     }
     chunksRef.current = [];
@@ -232,8 +297,7 @@ export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPromp
       const elapsed = Date.now() - startedAtRef.current;
       cleanupRecording();
       if (blob.size < 800 || elapsed < 250) {
-        setStatus('Too short');
-        setTimeout(dismiss, 900);
+        dismiss();
         return;
       }
       sendAudio(blob);
@@ -301,5 +365,5 @@ export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPromp
 
   useEffect(() => () => cleanupRecording(), [cleanupRecording]);
 
-  return { active, status, levels };
+  return { active, mode, levels };
 }

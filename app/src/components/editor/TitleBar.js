@@ -39,7 +39,7 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voi
     <p style={{ fontWeight: 500, WebkitAppRegion: 'drag' }}>Kōdan</p>
 
     <div style={{ display: 'flex', gap: 8, marginRight: 12, alignItems: 'center', WebkitAppRegion: 'no-drag' }}>
-      {voice?.active ? <VoiceIndicator levels={voice.levels} /> : null}
+      {voice?.active ? <VoiceIndicator mode={voice.mode} levels={voice.levels} /> : null}
       {showShare && (
         <button
           onClick={onShare}

@@ -707,7 +707,7 @@ const ProjectComponent = ({ projectId }) => {
       // flipping out of the loading state — otherwise we briefly show the
       // empty Scene Visual placeholder while the network fetch finishes.
       if (thumb) await loadThumbnail(thumb);
-      setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generated' }));
+      setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generate Visuals' }));
       setProjectData((prev) => {
         if (!prev) return prev;
         return {
@@ -1022,7 +1022,7 @@ const ProjectComponent = ({ projectId }) => {
       if (response.success) {
         setProgressMessageMap((prev) => ({ ...prev, [sceneIndex]: 'Generation Complete!' }));
         setCurrentlyLoading((prev) => prev.filter((scene) => scene !== sceneIndex));
-        setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generated' }));
+        setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generate Visuals' }));
       } else {
         setProgressMessageMap((prev) => ({ ...prev, [sceneIndex]: 'Generation Failed!' }));
         setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generate Visuals' }));
@@ -1355,6 +1355,20 @@ const ProjectComponent = ({ projectId }) => {
     onPrompt: handleVoicePrompt,
     getAuthToken: () => authToken,
     getCurrentPrompt: () => prompt,
+    getModelId: () => selectedFalModel,
+    getReferences: () =>
+      (references || [])
+        .map((r) => (typeof r === 'string' ? r : r?.url))
+        .filter(Boolean),
+    getContext: () => {
+      if (!projectData?.scenes?.length) return '';
+      const lines = projectData.scenes.slice(0, 50).map((s, i) => {
+        const p = String(s.positivePrompt || '').trim().slice(0, 240);
+        const marker = i + 1 === selectedScene ? ' ← currently editing' : '';
+        return `Scene ${i + 1}${marker}: ${p || '(empty)'}`;
+      });
+      return `Project: ${projectData.name || 'untitled'} (${projectData.scenes.length} scenes)\n${lines.join('\n')}`;
+    },
   });
 
   const handleFalModelChange = (event) => {

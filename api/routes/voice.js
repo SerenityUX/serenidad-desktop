@@ -1,9 +1,16 @@
 const express = require("express");
 const multer = require("multer");
-const { processVoicePrompt } = require("../lib/voicePrompt");
+const { fal } = require("@fal-ai/client");
+const {
+  transcribeAudio,
+  generateAck,
+  streamPrompt,
+  synthesizeSpeech,
+  getFalCredentials,
+} = require("../lib/voicePrompt");
 
 const VOICE_TOKEN_COST = 1;
-const MAX_AUDIO_BYTES = 8 * 1024 * 1024; // 8 MB cap; voice clips are short.
+const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
 module.exports = function createVoiceRouter(pool, requireAuth) {
   const router = express.Router();
@@ -30,6 +37,7 @@ module.exports = function createVoiceRouter(pool, requireAuth) {
         return res.status(400).json({ error: "Missing audio file" });
       }
 
+      // Charge tokens BEFORE we open the SSE stream so we can return a clean 402.
       const debitClient = await pool.connect();
       try {
         await debitClient.query("BEGIN");
@@ -73,38 +81,111 @@ module.exports = function createVoiceRouter(pool, requireAuth) {
               `voice prompt: ${String(notes || "").slice(0, 480)}`,
             ],
           );
-        } catch (refundErr) {
-          console.error(refundErr);
+        } catch (e) {
+          console.error(e);
         }
       };
 
-      let result;
+      // SSE setup
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders?.();
+
+      let closed = false;
+      req.on("close", () => {
+        closed = true;
+      });
+
+      const send = (event, data) => {
+        if (closed) return;
+        try {
+          res.write(`event: ${event}\n`);
+          res.write(`data: ${JSON.stringify(data)}\n\n`);
+        } catch {
+          /* connection gone */
+        }
+      };
+
+      const falKey = getFalCredentials();
+      if (falKey) fal.config({ credentials: falKey });
+
+      const currentPrompt = String(req.body?.current_prompt || "")
+        .trim()
+        .slice(0, 2000);
+      const context = String(req.body?.context || "").trim().slice(0, 8000);
+      const modelId = String(req.body?.model_id || "").trim().slice(0, 200);
+      let references = [];
+      if (req.body?.references) {
+        try {
+          const parsed = JSON.parse(req.body.references);
+          if (Array.isArray(parsed)) {
+            references = parsed
+              .filter((u) => typeof u === "string" && u.trim())
+              .slice(0, 8);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      let transcript;
       try {
-        result = await processVoicePrompt({
+        transcript = await transcribeAudio({
           buffer: req.file.buffer,
           contentType: req.file.mimetype,
-          currentPrompt: req.body?.current_prompt,
         });
       } catch (e) {
-        console.error(e);
-        await refundTokens(e.message || "voice pipeline failed");
-        return res
-          .status(502)
-          .json({ error: String(e.message || "Voice processing failed") });
+        console.error("STT failed:", e);
+        await refundTokens(e.message || "stt failed");
+        send("error", { error: e.message || "Transcription failed" });
+        return res.end();
       }
+      send("transcript", { text: transcript });
+
+      // Two parallel pipelines: quick ack + TTS, and streaming prompt.
+      const ackPipeline = (async () => {
+        try {
+          const ack = await generateAck(transcript);
+          send("response", { text: ack });
+          if (falKey) {
+            const audioUrl = await synthesizeSpeech(ack);
+            if (audioUrl) send("response_audio", { url: audioUrl });
+          }
+        } catch (e) {
+          console.warn("ack pipeline failed:", e.message);
+        }
+      })();
+
+      const promptPipeline = (async () => {
+        try {
+          const finalPrompt = await streamPrompt({
+            transcript,
+            currentPrompt,
+            context,
+            modelId,
+            references,
+            onChunk: (delta) => send("prompt_chunk", { delta }),
+          });
+          send("prompt_done", { text: finalPrompt });
+        } catch (e) {
+          console.error("prompt pipeline failed:", e.message);
+          send("error", { error: `Prompt build failed: ${e.message}` });
+        }
+      })();
+
+      await Promise.allSettled([ackPipeline, promptPipeline]);
 
       const tokRow = await pool.query(
         `SELECT tokens FROM users WHERE id = $1`,
         [req.user.id],
       );
-      return res.json({
-        prompt: result.prompt,
-        response: result.response,
-        transcript: result.transcript,
-        audio_url: result.audioUrl,
+      send("done", {
         tokens: tokRow.rows[0]?.tokens ?? 0,
         token_cost: VOICE_TOKEN_COST,
       });
+      res.end();
     },
   );
 
