@@ -7,6 +7,7 @@ import EditorLayout from './EditorLayout';
 import { VOICE_OPTIONS } from './stage/VoiceLineBar';
 import ShareModal from './ShareModal';
 import ProjectLoadingSkeleton from './ProjectLoadingSkeleton';
+import StoryboardView from './storyboard/StoryboardView';
 import { composeSceneToPng } from '../../lib/composeScene';
 import { encodeSegmentsToMp4 } from '../../lib/exportProject';
 import useVoicePrompt from '../../hooks/useVoicePrompt';
@@ -119,6 +120,10 @@ const ProjectComponent = ({ projectId }) => {
   // both image (hold time) and video (generation/playback) frames.
   const [sceneDuration, setSceneDuration] = useState(DEFAULT_IMAGE_DURATION);
   const [creatingVideo, setCreatingVideo] = useState(false);
+  // Tracks which scene numbers are currently mid-video-generation; surfaced
+  // to the storyboard so its in-progress cells show a progress bar.
+  const [creatingVideoScenes, setCreatingVideoScenes] = useState(new Set());
+  const [showStoryboard, setShowStoryboard] = useState(false);
   const [videoError, setVideoError] = useState(null);
   const [videoStatusMessage, setVideoStatusMessage] = useState('');
 
@@ -859,7 +864,13 @@ const ProjectComponent = ({ projectId }) => {
     const augmentedPrompt = voiceline
       ? `${promptText}\n\nVoiceline (${speakerWav || 'Narrator'}): "${voiceline}"`
       : promptText;
+    const targetSceneNumber = selectedScene;
     setCreatingVideo(true);
+    setCreatingVideoScenes((prev) => {
+      const next = new Set(prev);
+      next.add(targetSceneNumber);
+      return next;
+    });
     setVideoError(null);
     setVideoStatusMessage(
       `Sending request to ${selectedFalModel || defaultFalVideoModelId}…`,
@@ -906,6 +917,11 @@ const ProjectComponent = ({ projectId }) => {
       setVideoStatusMessage('');
     } finally {
       setCreatingVideo(false);
+      setCreatingVideoScenes((prev) => {
+        const next = new Set(prev);
+        next.delete(targetSceneNumber);
+        return next;
+      });
     }
   };
 
@@ -1647,6 +1663,7 @@ const ProjectComponent = ({ projectId }) => {
 
   return (
     <>
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
     <EditorLayout
       onExport={handleExportProject}
       onShare={() => setShareOpen(true)}
@@ -1787,6 +1804,8 @@ const ProjectComponent = ({ projectId }) => {
         },
         multiSelectedScenes,
         onMakeVideoFrame: makeVideoFrame,
+        showStoryboard,
+        onToggleStoryboard: () => setShowStoryboard((s) => !s),
         onSceneMouseLeave: () => {
           if (isMouseDown) {
             setIsMouseDown(false);
@@ -1805,6 +1824,31 @@ const ProjectComponent = ({ projectId }) => {
         onAddSceneMouseLeave: () => setPressedAddScene(false),
       }}
     />
+    {showStoryboard ? (
+      <div
+        style={{
+          position: 'absolute',
+          top: 45, // below the title bar
+          left: 0,
+          right: 0,
+          bottom: 0, // covers the scenes strip; the storyboard owns the rest
+          zIndex: 50,
+          backgroundColor: '#fff',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <StoryboardView
+          scenes={projectData?.scenes || []}
+          aspectRatio={projectAspectRatio}
+          currentlyLoading={currentlyLoading}
+          progressMap={progressMap}
+          creatingVideoSet={creatingVideoScenes}
+          onClose={() => setShowStoryboard(false)}
+        />
+      </div>
+    ) : null}
+    </div>
     {shareOpen ? (
       <ShareModal
         projectId={projectId}

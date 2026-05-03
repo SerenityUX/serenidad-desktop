@@ -13,6 +13,48 @@ const dropIndicatorStyle = {
   pointerEvents: 'none',
 };
 
+/**
+ * Storyboard toggle. Mirrors PlayPauseButton's flush-corner styling so the
+ * two cap the strip on opposite sides — same #404040 fill, same #fff border
+ * pair on bottom + the strip-facing edge.
+ */
+const StoryboardButton = ({ active, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-label={active ? 'Close storyboard' : 'Open storyboard'}
+    aria-pressed={!!active}
+    style={{
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      width: 28,
+      height: 28,
+      borderRadius: 0,
+      borderTop: 0,
+      borderRight: 0,
+      borderLeft: '1px solid #fff',
+      borderBottom: '1px solid #fff',
+      backgroundColor: active ? '#1F1F1F' : '#404040',
+      color: '#fff',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 0,
+      zIndex: 10,
+    }}
+  >
+    {/* 2×2 grid of small squares — a storyboard sheet at a glance. */}
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <rect x="1" y="1" width="5" height="4" stroke="#fff" strokeWidth="1.2" />
+      <rect x="8" y="1" width="5" height="4" stroke="#fff" strokeWidth="1.2" />
+      <rect x="1" y="8" width="5" height="4" stroke="#fff" strokeWidth="1.2" />
+      <rect x="8" y="8" width="5" height="4" stroke="#fff" strokeWidth="1.2" />
+    </svg>
+  </button>
+);
+
 const PlayPauseButton = ({ isPlaying, onClick, disabled }) => (
   <button
     type="button"
@@ -80,6 +122,8 @@ const ScenesStrip = ({
   onAddSceneMouseLeave,
   multiSelectedScenes,
   onMakeVideoFrame,
+  showStoryboard,
+  onToggleStoryboard,
 }) => {
   const [dragIndex, setDragIndex] = useState(null);
   const [dropTarget, setDropTarget] = useState(null); // index of slot (0..n)
@@ -216,6 +260,9 @@ const ScenesStrip = ({
           onClick={onTogglePlay}
           disabled={!canPlay && !isPlaying}
         />
+      )}
+      {onToggleStoryboard && (
+        <StoryboardButton active={showStoryboard} onClick={onToggleStoryboard} />
       )}
       {showMakeVideo && buttonLeft != null && (
         <button
