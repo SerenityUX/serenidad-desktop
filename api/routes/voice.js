@@ -83,6 +83,7 @@ module.exports = function createVoiceRouter(pool, requireAuth) {
         result = await processVoicePrompt({
           buffer: req.file.buffer,
           contentType: req.file.mimetype,
+          currentPrompt: req.body?.current_prompt,
         });
       } catch (e) {
         console.error(e);

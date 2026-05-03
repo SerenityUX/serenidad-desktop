@@ -38,7 +38,7 @@ const playBubble = (audioCtx) => {
  * Hold-to-talk hook: hold backtick to record, release to send.
  * Calls `onPrompt(text)` with the transcribed/cleaned prompt; returns indicator state.
  */
-export default function useVoicePrompt({ onPrompt, getAuthToken }) {
+export default function useVoicePrompt({ onPrompt, getAuthToken, getCurrentPrompt }) {
   const [active, setActive] = useState(false);
   const [status, setStatus] = useState('');
   const [levels, setLevels] = useState(SILENT_LEVELS);
@@ -55,6 +55,7 @@ export default function useVoicePrompt({ onPrompt, getAuthToken }) {
   const responseAudioRef = useRef(null);
   const onPromptRef = useRef(onPrompt);
   const getAuthTokenRef = useRef(getAuthToken);
+  const getCurrentPromptRef = useRef(getCurrentPrompt);
 
   useEffect(() => {
     onPromptRef.current = onPrompt;
@@ -62,6 +63,9 @@ export default function useVoicePrompt({ onPrompt, getAuthToken }) {
   useEffect(() => {
     getAuthTokenRef.current = getAuthToken;
   }, [getAuthToken]);
+  useEffect(() => {
+    getCurrentPromptRef.current = getCurrentPrompt;
+  }, [getCurrentPrompt]);
 
   const cleanupRecording = useCallback(() => {
     if (rafRef.current) {
@@ -99,6 +103,8 @@ export default function useVoicePrompt({ onPrompt, getAuthToken }) {
       try {
         const fd = new FormData();
         fd.append('audio', blob, 'voice.webm');
+        const currentPrompt = getCurrentPromptRef.current?.() || '';
+        if (currentPrompt) fd.append('current_prompt', currentPrompt);
         const res = await fetch(apiUrl('/voice/prompt'), {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },

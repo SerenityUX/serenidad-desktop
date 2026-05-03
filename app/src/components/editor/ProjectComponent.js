@@ -11,7 +11,6 @@ import ShareModal from './ShareModal';
 import ProjectLoadingSkeleton from './ProjectLoadingSkeleton';
 import { composeSceneToPng } from '../../lib/composeScene';
 import useVoicePrompt from '../../hooks/useVoicePrompt';
-import VoiceIndicator from '../voice/VoiceIndicator';
 
 const SECONDS_PER_FRAME = 2;
 
@@ -1355,6 +1354,7 @@ const ProjectComponent = ({ projectId }) => {
   const voice = useVoicePrompt({
     onPrompt: handleVoicePrompt,
     getAuthToken: () => authToken,
+    getCurrentPrompt: () => prompt,
   });
 
   const handleFalModelChange = (event) => {
@@ -1799,6 +1799,7 @@ const ProjectComponent = ({ projectId }) => {
       onExport={handleExportProject}
       onShare={() => setShareOpen(true)}
       showShare={isRemote && Boolean(authToken)}
+      voice={voice}
       leftSidebarProps={{
         baseModel,
         baseModels,
@@ -1967,9 +1968,6 @@ const ProjectComponent = ({ projectId }) => {
         authToken={authToken}
         onClose={() => setShareOpen(false)}
       />
-    ) : null}
-    {voice.active ? (
-      <VoiceIndicator status={voice.status} levels={voice.levels} />
     ) : null}
     </>
   );

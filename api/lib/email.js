@@ -1,6 +1,6 @@
 const { Resend } = require("resend");
 
-const FROM_EMAIL = "Serenidad <noreply@serenidad.app>";
+const FROM_EMAIL = "Serenidad <noreply@cc.serenidad.app>";
 
 function getResend() {
   const apiKey = process.env.RESEND_API_TOKEN;

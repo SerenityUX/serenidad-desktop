@@ -8,13 +8,27 @@ function getGroqKey() {
   return process.env.GROQ_API_KEY || "";
 }
 
-const SYSTEM_PROMPT = `You convert a user's spoken voice command into a clean text prompt for an anime image generator, plus a brief friendly acknowledgement spoken back to them.
+const SYSTEM_PROMPT = `You write image-generation prompts for an anime scene editor.
 
-Rules:
-- "prompt" is the cleaned-up version of what the user said, suitable as an image-generation prompt. Strip filler words ("um", "uh"), false starts, and meta phrases like "I want a scene where". Keep their creative intent.
-- "response" is a SHORT spoken acknowledgement (max ~10 words), casual and warm. Examples: "got it boss!", "on it!", "sweet, locked in.", "say less, working on it".
-- Both fields must always be non-empty strings.
-- Output ONLY valid JSON shaped exactly: {"prompt": "...", "response": "..."}`;
+Inputs you receive from the user message:
+- CURRENT PROMPT: what's already in the prompt textarea (may be empty)
+- VOICE: what the user just said into the mic
+
+Your job: produce JSON with two fields, "prompt" and "response".
+
+"prompt" rules:
+- If CURRENT PROMPT is non-empty, treat VOICE as edit instructions and return the modified prompt — preserve everything VOICE didn't change.
+- If CURRENT PROMPT is empty, build a fresh prompt from VOICE.
+- Strip filler ("um", "uh"), false starts, and meta phrases like "I want a scene where".
+- ALWAYS include concrete anime-style direction in the prompt itself. Pick details that fit the subject — e.g. "cel-shaded anime style, crisp line art, vibrant saturated palette, cinematic key-frame composition, soft rim light, expressive eyes, Studio Ghibli / modern shōnen feel." If CURRENT PROMPT already specifies a style, keep that style and don't pile on conflicting descriptors.
+- Output the prompt as plain natural-language description, no quotes or labels.
+
+"response" rules:
+- Short spoken acknowledgement, max ~10 words, casual and warm.
+- NEVER use "boss", "sir", "ma'am", or any honorific/term of address. Just acknowledge the task.
+- Examples: "got it, on it.", "sweet, locked in.", "say less, working on it.", "done, prompt's updated.", "easy, queued up."
+
+Output ONLY valid JSON shaped exactly: {"prompt": "...", "response": "..."}`;
 
 /** Groq Whisper turbo: typically <1s for short clips, no queue/upload step. */
 async function transcribeAudio({ buffer, contentType }) {
@@ -50,9 +64,11 @@ async function transcribeAudio({ buffer, contentType }) {
 }
 
 /** Groq llama 8b instant: ~200-500ms for short JSON outputs. */
-async function structureWithLLM(transcript) {
+async function structureWithLLM(transcript, currentPrompt) {
   const key = getGroqKey();
   if (!key) throw new Error("GROQ_API_KEY is not configured");
+
+  const userMessage = `CURRENT PROMPT: ${currentPrompt ? currentPrompt : "(empty)"}\nVOICE: ${transcript}`;
 
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -63,11 +79,11 @@ async function structureWithLLM(transcript) {
     body: JSON.stringify({
       model: "llama-3.1-8b-instant",
       temperature: 0.3,
-      max_tokens: 200,
+      max_tokens: 400,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: transcript },
+        { role: "user", content: userMessage },
       ],
     }),
   });
@@ -110,12 +126,16 @@ async function synthesizeSpeech(text) {
  * @param {{ buffer: Buffer, contentType: string }} audio
  * @returns {Promise<{ prompt: string, response: string, audioUrl: string|null, transcript: string }>}
  */
-async function processVoicePrompt({ buffer, contentType }) {
+async function processVoicePrompt({ buffer, contentType, currentPrompt }) {
   const falKey = getFalCredentials();
   if (falKey) fal.config({ credentials: falKey });
 
   const transcript = await transcribeAudio({ buffer, contentType });
-  const { prompt, response } = await structureWithLLM(transcript);
+  const trimmedCurrent = String(currentPrompt || "").trim().slice(0, 2000);
+  const { prompt, response } = await structureWithLLM(
+    transcript,
+    trimmedCurrent,
+  );
   const responseAudioUrl = falKey ? await synthesizeSpeech(response) : null;
 
   return { prompt, response, audioUrl: responseAudioUrl, transcript };

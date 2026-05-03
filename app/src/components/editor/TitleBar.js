@@ -1,5 +1,6 @@
 import React from 'react';
 import ProfileAvatarMenu from '../ProfileAvatarMenu';
+import VoiceIndicator from '../voice/VoiceIndicator';
 import { useAuth } from '../../context/AuthContext';
 
 const TrafficLight = ({ color, action }) => (
@@ -16,7 +17,7 @@ const TrafficLight = ({ color, action }) => (
   />
 );
 
-const TitleBar = ({ onExport, onShare, showExport = true, showShare = false }) => {
+const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voice }) => {
   const { user } = useAuth();
   return (
   <div style={{
@@ -38,6 +39,7 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false }) =
     <p style={{ fontWeight: 500, WebkitAppRegion: 'drag' }}>Kōdan</p>
 
     <div style={{ display: 'flex', gap: 8, marginRight: 12, alignItems: 'center', WebkitAppRegion: 'no-drag' }}>
+      {voice?.active ? <VoiceIndicator levels={voice.levels} /> : null}
       {showShare && (
         <button
           onClick={onShare}
