@@ -165,7 +165,7 @@ const FAL_VIDEO_MODELS = [
     defaultDuration: 4,
     supportsReferences: true,
     supportsEndFrame: false,
-    referenceImagesKey: "reference_image_urls",
+    referenceImagesKey: "image_urls",
   },
   {
     id: "fal-ai/minimax/hailuo-02/standard/image-to-video",
@@ -211,7 +211,7 @@ const HIDDEN_ALIASES = [
     defaultDuration: 4,
     supportsReferences: true,
     supportsEndFrame: false,
-    referenceImagesKey: "reference_image_urls",
+    referenceImagesKey: "image_urls",
     aliasOf: "alibaba/happy-horse/reference-to-video",
   },
 ];

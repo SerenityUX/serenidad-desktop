@@ -61,7 +61,38 @@ async function generateFalVideo(opts) {
     referenceUrls: opts.referenceUrls,
   });
 
-  const result = await fal.subscribe(model.id, { input, logs: false });
+  let result;
+  try {
+    result = await fal.subscribe(model.id, { input, logs: false });
+  } catch (err) {
+    // The fal client wraps validation errors in an object with `body.detail`
+    // listing per-field problems. Surface that text so the editor can show
+    // exactly which input field the model didn't accept.
+    const detail = err?.body?.detail;
+    let detailText = "";
+    if (Array.isArray(detail)) {
+      detailText = detail
+        .map((d) => {
+          const loc = Array.isArray(d?.loc) ? d.loc.join(".") : "";
+          return loc ? `${loc}: ${d.msg || d.type}` : (d.msg || JSON.stringify(d));
+        })
+        .join("; ");
+    } else if (typeof detail === "string") {
+      detailText = detail;
+    } else if (detail && typeof detail === "object") {
+      detailText = JSON.stringify(detail);
+    }
+    const baseMsg = err?.message || "fal generation failed";
+    const status = err?.status ? ` (HTTP ${err.status})` : "";
+    const sentKeys = Object.keys(input).join(", ");
+    console.error("fal video error", { model: model.id, sentKeys, status: err?.status, detail });
+    throw new Error(
+      detailText
+        ? `${baseMsg}${status}: ${detailText}`
+        : `${baseMsg}${status}`,
+    );
+  }
+
   const url =
     result?.data?.video?.url ||
     result?.data?.video_url ||
