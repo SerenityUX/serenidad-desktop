@@ -40,6 +40,14 @@ async function main() {
 
   const server = app.listen(port, () => {
     console.log(`API listening on http://localhost:${port}`);
+    const keyStatus = (name) => {
+      const v = String(process.env[name] || "").trim();
+      if (!v || v === "undefined") return "MISSING";
+      return `ok (len=${v.length})`;
+    };
+    console.log(
+      `[voice] keys: GROQ_API_KEY=${keyStatus("GROQ_API_KEY")}, OPEN_ROUTER_API_TOKEN=${keyStatus("OPEN_ROUTER_API_TOKEN")}, FAL_API_KEY=${keyStatus("FAL_API_KEY")}`,
+    );
   });
 
   const shutdown = async () => {

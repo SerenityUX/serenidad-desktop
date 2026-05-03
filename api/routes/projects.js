@@ -96,6 +96,11 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
         costCents: m.costCents,
         defaultDuration: m.defaultDuration,
         supportsReferences: m.supportsReferences !== false,
+        supportsEndFrame: m.supportsEndFrame === true,
+        // True if the model can use 2+ references — either as start/end frame
+        // or as an array of conditioning images (reference-to-video).
+        acceptsMultipleReferences:
+          m.supportsEndFrame === true || Boolean(m.referenceImagesKey),
       })),
       defaultVideoId: DEFAULT_VIDEO_MODEL_ID,
     });

@@ -768,6 +768,18 @@ const ProjectComponent = ({ projectId }) => {
     }
     const lastIdx = allSelectedNumbers[allSelectedNumbers.length - 1] - 1;
 
+    // 2+ refs only mean something to a model that takes an array of refs
+    // (reference-to-video, e.g. Happy Horse) or an end frame (image-to-video
+    // FLF, e.g. Seedance/Kling). If the default doesn't, pick the first
+    // catalog entry that does so the new frame's dropdown is already useful.
+    const acceptsMulti = (m) =>
+      m && (m.acceptsMultipleReferences || m.supportsEndFrame);
+    const defaultModel = falVideoModels.find((m) => m.id === defaultFalVideoModelId);
+    const fallback = falVideoModels.find(acceptsMulti);
+    const modelForNewFrame = acceptsMulti(defaultModel)
+      ? defaultFalVideoModelId
+      : (fallback?.id || defaultFalVideoModelId);
+
     try {
       const addRes = await fetch(
         apiUrl(`/projects/${encodeURIComponent(projectId)}/frames`),
@@ -786,7 +798,7 @@ const ProjectComponent = ({ projectId }) => {
       const referenceUrls = sourceScenes.map((s) => s.thumbnail);
 
       await patchFrame(newFrameId, {
-        model: defaultFalVideoModelId,
+        model: modelForNewFrame,
         reference_urls: referenceUrls,
         meta: {
           kind: 'video',
@@ -809,7 +821,7 @@ const ProjectComponent = ({ projectId }) => {
           thumbnail: '',
           positivePrompt: '',
           references: referenceUrls,
-          model: defaultFalVideoModelId,
+          model: modelForNewFrame,
           voiceline: '',
           speaker: 'Narrator',
           baseModel: '',

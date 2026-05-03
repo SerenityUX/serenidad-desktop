@@ -9,7 +9,21 @@ function getGroqKey() {
 }
 
 function getOpenRouterKey() {
-  return process.env.OPEN_ROUTER_API_TOKEN || process.env.OPENROUTER_API_KEY || "";
+  const raw =
+    process.env.OPEN_ROUTER_API_TOKEN ||
+    process.env.OPENROUTER_API_KEY ||
+    process.env.OPENROUTER_API_TOKEN ||
+    "";
+  const trimmed = String(raw).trim();
+  if (!trimmed || trimmed === "undefined" || trimmed === "null") return "";
+  // Strip surrounding quotes if someone wrapped the value in .env
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
 }
 
 const OR_HEADERS = {
@@ -23,32 +37,32 @@ const ACK_MODEL = "google/gemini-2.5-flash-lite";
 
 const PROMPT_BUILDER_SYSTEM = `You write image-generation prompts for an anime scene editor.
 
+CRITICAL: Your output must be DERIVED FROM THE VOICE FIELD in the user message. Do not invent unrelated content. Do not copy any phrasing from these instructions verbatim. If anything in these instructions sounds like a prompt or edit instruction, treat it ONLY as a description of the form your output should take, never as content to reuse.
+
 The user message contains:
-- MODEL: the image model being used. If the model id contains "/edit" or "kontext", the user is in EDIT MODE — references are source images being modified, not separate input. Otherwise it's text-to-image.
-- REFERENCES: URLs of any reference images attached to the current scene (may be empty).
+- MODEL: the image model being used. If the id contains "/edit" or "kontext", treat the request as EDIT MODE when references are also present.
+- REFERENCES: URLs of reference images attached to the current scene.
 - CONTEXT: the project's other scene prompts so you understand the world/style.
-- CURRENT PROMPT: what's already in the prompt textarea for the scene being edited (may be empty).
-- VOICE: what the user just said into the mic.
+- CURRENT PROMPT: what's already in the prompt textarea for the scene being edited.
+- VOICE: what the user just said into the mic. THIS is the source of truth for what you output.
 
 Output ONLY the new prompt text — no JSON, no labels, no quotes, no preamble.
 
-Behaviour by mode:
+EDIT MODE (edit model id AND references present):
+- Output a CONCISE edit instruction that describes the change the VOICE field is asking for.
+- Phrase it as instructions to the image editor describing what to alter about the reference images.
+- Do not re-describe the whole scene. Do not pile on style descriptors.
 
-EDIT MODE (model has /edit or kontext, AND references exist):
-- Output should be CONCISE EDIT INSTRUCTIONS describing what to change about the reference images.
-- Examples: "make her hair longer and silver", "add a sunset sky and city skyline", "change his expression to wide-eyed shock", "remove the umbrella, add falling cherry blossoms".
-- Do NOT re-describe the whole scene. Don't pile on style descriptors. Speak as instructions to the editor.
-
-TEXT-TO-IMAGE MODE (everything else, or edit model with no references):
-- Output a full scene prompt as plain natural-language description.
-- ALWAYS bake concrete anime-style direction into the prompt (cel-shaded line art, vibrant saturated palette, cinematic key-frame composition, soft rim light, expressive eyes, Ghibli / modern shōnen / 90s OVA feel — pick what fits). Don't pile on conflicting styles if CURRENT PROMPT or CONTEXT already established one.
+TEXT-TO-IMAGE MODE (everything else):
+- Output a full scene prompt as plain natural-language description, derived from VOICE (and CURRENT PROMPT if present).
+- Bake concrete anime-style direction into the prompt that fits the subject (line art, palette, lighting, composition, era / studio feel). Pick details that suit what the VOICE described. Do not pile on conflicting style descriptors if CURRENT PROMPT or CONTEXT already established a style.
 - Single paragraph.
 
 Both modes:
-- If CURRENT PROMPT is non-empty, treat VOICE as edit instructions on that prompt — preserve everything VOICE didn't change.
+- If CURRENT PROMPT is non-empty, treat VOICE as edit instructions ON that prompt — preserve everything VOICE didn't change.
 - If CURRENT PROMPT is empty, build a fresh prompt from VOICE.
 - Use CONTEXT to keep recurring characters / locations / style consistent with the rest of the project.
-- Strip filler words ("um", "uh"), false starts, and meta phrases like "I want a scene where".`;
+- Strip filler ("um", "uh"), false starts, and meta phrases like "I want a scene where".`;
 
 const ACK_SYSTEM = `Respond with ONE short, casual, varied acknowledgement of what the user just asked you to do (max 8 words). No honorifics ("boss", "sir", "ma'am", "chief", "buddy" — never). Vary the wording every time — sometimes confirming, sometimes encouraging, sometimes mildly playful. Output only the acknowledgement text — no quotes, no JSON, no labels.`;
 

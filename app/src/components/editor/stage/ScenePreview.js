@@ -181,7 +181,7 @@ const ScenePreview = ({
 };
 
 const VideoStatusOverlay = ({ status, error, onDismiss }) => {
-  if (!status && !error) return null;
+  if (!error) return null;
   return (
     <div
       style={{

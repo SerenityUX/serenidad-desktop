@@ -5,30 +5,44 @@ function getFalCredentials() {
   return process.env.FAL_API_KEY || process.env.FAL_KEY || "";
 }
 
+/**
+ * Build the input payload for a fal video model.
+ *
+ * - First reference is always the start frame (`image_url`).
+ * - Last reference (when 2+ refs are passed) is the end frame, written under
+ *   the model-specific key declared in the catalog (`endFrameKey`). For models
+ *   that do not support an end frame this key is omitted entirely — passing
+ *   unknown fields is silently ignored on permissive endpoints and rejected on
+ *   strict ones, so we just don't send it.
+ * - Prompt and duration are passed through unchanged; the prompt is what the
+ *   model uses to plan the motion that connects the two frames.
+ */
 function buildVideoInput(model, { prompt, durationSeconds, referenceUrls }) {
   const refs = Array.isArray(referenceUrls) ? referenceUrls.filter(Boolean) : [];
   const duration = Math.max(1, Math.min(30, Number(durationSeconds) || 4));
-  // fal video models tolerate unknown keys, so we send all common spellings
-  // for "start" and "end" frames — different families pick different ones:
-  //   image_url + end_image_url   → Luma, Seedance, Happy Horse
-  //   image_url + tail_image_url  → Kling
-  //   image_url + last_image_url  → Wan
   const input = { prompt, duration };
-  if (refs[0]) input.image_url = refs[0];
-  if (refs[1]) {
-    input.end_image_url = refs[1];
-    input.tail_image_url = refs[1];
-    input.image_tail_url = refs[1];
-    input.last_image_url = refs[1];
+
+  // Reference-to-video models (e.g. Happy Horse) take an array of refs at a
+  // single field and ignore start/end semantics. Send all refs through that.
+  if (model.referenceImagesKey) {
+    if (refs.length > 0) input[model.referenceImagesKey] = refs;
+    return input;
   }
-  if (refs.length > 0) input.image_urls = refs;
+
+  // Image-to-video shape: first ref is the start frame; last ref (if any) is
+  // the end frame, written under the model-specific key the catalog declares.
+  if (refs[0]) input.image_url = refs[0];
+  const endRef = refs.length > 1 ? refs[refs.length - 1] : null;
+  if (endRef && model.supportsEndFrame && model.endFrameKey) {
+    input[model.endFrameKey] = endRef;
+  }
   return input;
 }
 
 /**
  * Generate a video clip with a fal video model. Returns the mp4 URL.
  * @param {{ modelId?: string, prompt: string, durationSeconds?: number,
- *           referenceUrls: string[], width?: number, height?: number }} opts
+ *           referenceUrls: string[] }} opts
  */
 async function generateFalVideo(opts) {
   const key = getFalCredentials();
