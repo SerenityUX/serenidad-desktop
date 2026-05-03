@@ -19,7 +19,7 @@ const TrafficLight = ({ color, action }) => (
 
 const EXIT_ANIM_MS = 280;
 
-const CenterSlot = ({ voice }) => {
+const CenterSlot = ({ voice, projectName }) => {
   const active = !!voice?.active;
   const [mounted, setMounted] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -55,20 +55,23 @@ const CenterSlot = ({ voice }) => {
     );
   }
   return (
-    <p style={{ fontWeight: 500, margin: 0, WebkitAppRegion: 'drag' }}>Kōdan</p>
+    <p
+      style={{
+        fontWeight: 500,
+        margin: 0,
+        WebkitAppRegion: 'drag',
+        maxWidth: '50vw',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+      }}
+    >
+      {projectName && projectName.trim() ? projectName : 'Kōdan'}
+    </p>
   );
 };
 
-const TitleBar = ({
-  onExport,
-  onShare,
-  showExport = true,
-  showShare = false,
-  voice,
-  isPlaying = false,
-  onTogglePlay,
-  canPlay = false,
-}) => {
+const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voice, projectName }) => {
   const { user } = useAuth();
   return (
   <div style={{
@@ -87,29 +90,9 @@ const TitleBar = ({
       <TrafficLight color="#28C840" action="maximize-app" />
     </div>
 
-    <CenterSlot voice={voice} />
+    <CenterSlot voice={voice} projectName={projectName} />
 
     <div style={{ display: 'flex', gap: 8, marginRight: 12, alignItems: 'center', WebkitAppRegion: 'no-drag' }}>
-      {onTogglePlay && (
-        <button
-          onClick={onTogglePlay}
-          disabled={!canPlay && !isPlaying}
-          style={{
-            backgroundColor: '#fff',
-            color: canPlay || isPlaying ? '#404040' : '#B0B0B0',
-            paddingLeft: 8,
-            paddingRight: 8,
-            border: '1px solid #D9D9D9',
-            borderRadius: 4,
-            paddingTop: 4,
-            paddingBottom: 4,
-            cursor: canPlay || isPlaying ? 'pointer' : 'not-allowed',
-            WebkitAppRegion: 'no-drag',
-          }}
-        >
-          {isPlaying ? 'Pause' : 'Play'}
-        </button>
-      )}
       {showShare && (
         <button
           onClick={onShare}

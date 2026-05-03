@@ -30,43 +30,61 @@ const OR_HEADERS = {
   "X-Title": "Kodan Voice Prompt",
 };
 
-const VOICE_MODEL = "google/gemini-2.5-flash-lite";
+// Multimodal + fast. Smarter than flash-lite at intent routing and short-edit
+// pass-through, while still cheap/quick enough for hold-to-talk UX.
+const VOICE_MODEL = "google/gemini-2.5-flash";
 
-const VOICE_UPDATE_SYSTEM = `You are an assistant inside an anime scene editor. You receive what the user just said into the mic and return a JSON object describing how to update the current scene.
+const IMAGE_REF_RE = /\.(png|jpe?g|webp|gif|bmp|tiff)(\?|$)/i;
 
-The user message contains:
-- MODEL: image/video model id. If the id contains "/edit" or "kontext", treat the request as EDIT MODE when references are also present.
-- REFERENCES: URLs of reference images attached to the current scene.
-- CONTEXT: the project's other scene prompts so you understand the world/style.
-- CURRENT PROMPT: what's already in the prompt textarea.
-- CURRENT VOICELINE: what's already in the voiceline textbox.
-- VOICE: what the user just said into the mic. THIS is the source of truth.
+const VOICE_UPDATE_SYSTEM = `You are an inline assistant inside an ANIME STORYBOARD editor — every output frame is anime by default. You receive a single short voice command and return a JSON patch describing how to update the current scene. Be minimal — never invent details the user didn't ask for.
 
-Return ONLY a JSON object with these fields, no preamble, no markdown fences:
+INPUTS (in the user message):
+- MODEL: image/video model id. Treat as EDIT MODE if the id contains "/edit", "kontext", "image-to-", "video-to-", or "reference-to-".
+- REFERENCES: URLs of images attached to this scene. The actual images are also attached as image inputs in this message — look at them to ground your output in what's already on screen.
+- CONTEXT: other scene prompts in this project (for style continuity).
+- CURRENT PROMPT: existing prompt textarea content.
+- CURRENT VOICELINE: existing voiceline.
+- CURRENT SPEAKER: currently selected voice option.
+- AVAILABLE SPEAKERS: the only valid values for the speaker field.
+- VOICE: what the user just said into the mic.
+
+OUTPUT — return ONLY this JSON object, no markdown fences, no preamble:
 {
-  "voiceline": string | null,
   "prompt": string,
+  "voiceline": string | null,
+  "speaker": string | null,
   "editorResponse": string
 }
 
-voiceline:
-- If the VOICE explicitly dictates spoken dialogue for the scene (e.g. "have him say...", "she shouts...", quoted dialogue), return that line as a clean string.
-- Otherwise return null. Do not invent dialogue.
-- If the user is editing existing dialogue, return the new full dialogue.
+==== prompt ====
+This is what goes in the prompt textarea. Always return a string (use CURRENT PROMPT verbatim if VOICE doesn't change the visual).
 
-prompt:
-- A scene prompt for the image/video model, derived from VOICE.
-- EDIT MODE (edit model id AND references present): a CONCISE edit instruction describing the change VOICE asks for. Don't re-describe the whole scene.
-- TEXT-TO-IMAGE/VIDEO MODE: a full single-paragraph natural-language scene description with anime-style direction that fits the subject. Don't pile on conflicting style descriptors if CURRENT PROMPT or CONTEXT already established a style.
-- If CURRENT PROMPT is non-empty, treat VOICE as edit instructions ON it — preserve everything VOICE didn't change.
-- If CURRENT PROMPT is empty, build fresh from VOICE.
-- Use CONTEXT to keep recurring characters / locations / style consistent.
-- Strip filler ("um", "uh"), false starts, and meta phrases like "I want a scene where".
+Routing — pick ONE rule:
+1. EDIT MODE *or* references attached, AND VOICE is a short edit ("make it night", "blue hair", "remove the cat", "add a speech bubble saying X"):
+   - If CURRENT PROMPT is empty → prompt = the cleaned VOICE phrase, kept short and verbatim. Example: VOICE "make it night" → prompt "make it night". Do NOT expand into a full scene description.
+   - If CURRENT PROMPT is non-empty → fold the edit into CURRENT PROMPT, preserving everything VOICE didn't touch. Stay roughly the same length.
+2. NO references attached AND VOICE describes a scene (any subject, even short like "two people eating lunch"):
+   - This is a from-scratch base image generation for an anime storyboard. Lean into anime stylistic direction.
+   - Build a single-paragraph natural-language prompt that bakes in concrete anime-style cues fitting the subject: line-art quality, palette/lighting, composition / shot framing, era-or-studio feel (e.g. 90s cel-shaded, modern Kyoto Animation softness, Ghibli warmth, shōnen ink line, etc.). Pick what fits the subject — don't pile on conflicting descriptors.
+   - If CONTEXT already establishes a style, stay consistent with it instead of inventing a new one.
+   - Be specific (camera angle, lighting, mood) so the image model has something to work with — but don't over-write a long essay; one tight paragraph.
+3. References ARE attached AND VOICE describes a fresh scene ("come up with...", "make a scene where..."):
+   - Build the scene prompt suited to MODEL but DO NOT add anime / art-style descriptors — the references already convey the visual style. Describe subject, action, composition, lighting only.
+4. VOICE only sets voiceline / speaker / caption text and does not change the visual at all:
+   - prompt = CURRENT PROMPT unchanged.
 
-editorResponse:
-- ONE short, casual, varied acknowledgement of what the user asked (max 8 words).
-- No honorifics ("boss", "sir", "ma'am", "chief", "buddy").
-- Vary the wording every time.`;
+If VOICE mentions "caption" / "speech bubble" / on-screen text, describe that text element in the prompt so the image model renders it (not the editor caption overlay).
+
+Always strip filler ("um", "uh", false starts, "I want a scene where", "let's").
+
+==== voiceline ====
+Spoken dialogue for this scene. Only set when VOICE explicitly dictates dialogue ("have her say X", "she shouts Y", quoted speech, "make her line: X"). Otherwise null. NEVER invent dialogue.
+
+==== speaker ====
+Voice option for the line. Only set when VOICE explicitly asks to change the voice ("use a male voice", "switch to Female - Soft", "make the speaker female"). Match the user's intent to the closest entry in AVAILABLE SPEAKERS, returning the EXACT string from that list. Otherwise null.
+
+==== editorResponse ====
+ONE short, casual, varied acknowledgement of what you just did (max 8 words). No honorifics ("boss", "sir", "ma'am", "chief", "buddy"). Vary wording every time.`;
 
 async function transcribeAudio({ buffer, contentType }) {
   const key = getGroqKey();
@@ -105,10 +123,25 @@ function stripJsonFence(s) {
   return t;
 }
 
+function pickClosestSpeaker(value, allowed) {
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  if (!v) return null;
+  const exact = allowed.find((s) => s.toLowerCase() === v.toLowerCase());
+  if (exact) return exact;
+  // tolerant: match by substring (e.g. model said "Male Deep" → "Male - Deep")
+  const norm = (s) => s.toLowerCase().replace(/[^a-z]+/g, " ").trim();
+  const target = norm(v);
+  const fuzzy = allowed.find((s) => norm(s) === target);
+  return fuzzy || null;
+}
+
 async function generateVoiceUpdate({
   transcript,
   currentPrompt,
   currentVoiceline,
+  currentSpeaker,
+  availableSpeakers,
   context,
   modelId,
   references,
@@ -117,18 +150,31 @@ async function generateVoiceUpdate({
   if (!key) throw new Error("OPEN_ROUTER_API_TOKEN is not configured");
 
   const refs = Array.isArray(references) ? references.filter(Boolean) : [];
+  const imageRefs = refs.filter((u) => IMAGE_REF_RE.test(u));
+  const speakers = Array.isArray(availableSpeakers) && availableSpeakers.length
+    ? availableSpeakers
+    : ["Narrator"];
+
   const refLines = refs.length
     ? refs.map((u, i) => `  ${i + 1}. ${u}`).join("\n")
     : "  (none attached)";
 
-  const userMessage = [
+  const userText = [
     `MODEL: ${modelId || "(unknown)"}`,
     `REFERENCES (${refs.length}):\n${refLines}`,
     `CONTEXT:\n${context ? context : "(no other scenes yet)"}`,
     `CURRENT PROMPT: ${currentPrompt ? currentPrompt : "(empty)"}`,
     `CURRENT VOICELINE: ${currentVoiceline ? currentVoiceline : "(empty)"}`,
+    `CURRENT SPEAKER: ${currentSpeaker || "(none)"}`,
+    `AVAILABLE SPEAKERS: ${speakers.join(", ")}`,
     `VOICE: ${transcript}`,
   ].join("\n\n");
+
+  const userContent = [{ type: "text", text: userText }];
+  // Cap at 4 images to keep latency tight.
+  for (const url of imageRefs.slice(0, 4)) {
+    userContent.push({ type: "image_url", image_url: { url } });
+  }
 
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -139,12 +185,12 @@ async function generateVoiceUpdate({
     },
     body: JSON.stringify({
       model: VOICE_MODEL,
-      temperature: 0.7,
+      temperature: 0.4,
       max_tokens: 800,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: VOICE_UPDATE_SYSTEM },
-        { role: "user", content: userMessage },
+        { role: "user", content: userContent },
       ],
     }),
   });
@@ -165,9 +211,10 @@ async function generateVoiceUpdate({
       ? parsed.voiceline.trim()
       : null;
   const prompt = String(parsed.prompt || "").trim();
+  const speaker = pickClosestSpeaker(parsed.speaker, speakers);
   const editorResponse =
-    String(parsed.editorResponse || "").trim() || "alright.";
-  return { voiceline, prompt, editorResponse };
+    String(parsed.editorResponse || "").trim() || "got it.";
+  return { voiceline, prompt, speaker, editorResponse };
 }
 
 async function synthesizeSpeech(text) {

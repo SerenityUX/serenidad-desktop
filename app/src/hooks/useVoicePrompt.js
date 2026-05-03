@@ -47,6 +47,8 @@ export default function useVoicePrompt({
   getAuthToken,
   getCurrentPrompt,
   getCurrentVoiceline,
+  getCurrentSpeaker,
+  getAvailableSpeakers,
   getContext,
   getModelId,
   getReferences,
@@ -71,6 +73,8 @@ export default function useVoicePrompt({
   const getAuthTokenRef = useRef(getAuthToken);
   const getCurrentPromptRef = useRef(getCurrentPrompt);
   const getCurrentVoicelineRef = useRef(getCurrentVoiceline);
+  const getCurrentSpeakerRef = useRef(getCurrentSpeaker);
+  const getAvailableSpeakersRef = useRef(getAvailableSpeakers);
   const getContextRef = useRef(getContext);
   const getModelIdRef = useRef(getModelId);
   const getReferencesRef = useRef(getReferences);
@@ -87,6 +91,12 @@ export default function useVoicePrompt({
   useEffect(() => {
     getCurrentVoicelineRef.current = getCurrentVoiceline;
   }, [getCurrentVoiceline]);
+  useEffect(() => {
+    getCurrentSpeakerRef.current = getCurrentSpeaker;
+  }, [getCurrentSpeaker]);
+  useEffect(() => {
+    getAvailableSpeakersRef.current = getAvailableSpeakers;
+  }, [getAvailableSpeakers]);
   useEffect(() => {
     getContextRef.current = getContext;
   }, [getContext]);
@@ -136,6 +146,12 @@ export default function useVoicePrompt({
         if (currentPrompt) fd.append('current_prompt', currentPrompt);
         const currentVoiceline = getCurrentVoicelineRef.current?.() || '';
         if (currentVoiceline) fd.append('current_voiceline', currentVoiceline);
+        const currentSpeaker = getCurrentSpeakerRef.current?.() || '';
+        if (currentSpeaker) fd.append('current_speaker', currentSpeaker);
+        const availableSpeakers = getAvailableSpeakersRef.current?.();
+        if (Array.isArray(availableSpeakers) && availableSpeakers.length) {
+          fd.append('available_speakers', JSON.stringify(availableSpeakers));
+        }
         const context = getContextRef.current?.() || '';
         if (context) fd.append('context', context);
         const modelId = getModelIdRef.current?.() || '';
@@ -166,6 +182,7 @@ export default function useVoicePrompt({
             onUpdateRef.current?.({
               voiceline: typeof data.voiceline === 'string' ? data.voiceline : null,
               prompt: typeof data.prompt === 'string' ? data.prompt : '',
+              speaker: typeof data.speaker === 'string' ? data.speaker : null,
               editorResponse:
                 typeof data.editorResponse === 'string' ? data.editorResponse : '',
             });

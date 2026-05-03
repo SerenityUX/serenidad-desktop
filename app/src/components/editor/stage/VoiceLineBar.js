@@ -19,13 +19,13 @@ const VoiceLineBar = ({
   speakerWav,
   onSpeakerChange,
 }) => (
-  <div style={{ width: '100%', gap: 16, display: 'flex', flexDirection: 'row', maxWidth: '700px', paddingTop: 24 }}>
+  <div style={{ width: '100%', gap: 12, display: 'flex', flexDirection: 'row', justifyContent: 'center', maxWidth: '520px', paddingTop: 24 }}>
     <input
       value={voiceText}
       onChange={onVoiceTextChange}
       onBlur={onVoiceTextBlur}
       placeholder="Voiceline for this scene..."
-      style={{ display: 'flex', width: '100%' }}
+      style={{ display: 'flex', flex: 1, minWidth: 0 }}
     />
 
     <div style={{

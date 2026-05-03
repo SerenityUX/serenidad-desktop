@@ -13,15 +13,58 @@ const dropIndicatorStyle = {
   pointerEvents: 'none',
 };
 
+const PlayPauseButton = ({ isPlaying, onClick, disabled }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    aria-label={isPlaying ? 'Pause' : 'Play'}
+    style={{
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: 28,
+      height: 28,
+      borderRadius: 0,
+      borderTop: 0,
+      borderLeft: 0,
+      borderRight: '1px solid #fff',
+      borderBottom: '1px solid #fff',
+      backgroundColor: '#404040',
+      color: '#fff',
+      cursor: disabled ? 'not-allowed' : 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 0,
+      zIndex: 10,
+      opacity: disabled ? 0.4 : 1,
+    }}
+  >
+    {isPlaying ? (
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="#fff">
+        <rect x="2" y="1.5" width="3" height="9" rx="0.5" />
+        <rect x="7" y="1.5" width="3" height="9" rx="0.5" />
+      </svg>
+    ) : (
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="#fff">
+        <path d="M3 1.8 L3 10.2 L10 6 Z" />
+      </svg>
+    )}
+  </button>
+);
+
 const ScenesStrip = ({
   projectData,
   selectedScene,
+  isPlaying,
+  onTogglePlay,
+  canPlay,
   pressedScene,
   isMouseDown,
   deletingScenes,
   currentlyLoading,
   thumbnail,
-  thumbnailTimestamps,
   aspectRatio,
   canExportClip,
   sceneRefs,
@@ -157,8 +200,23 @@ const ScenesStrip = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showMakeVideo, selectedScene, multiSelectedScenes]);
 
+  // Keep the selected scene in view as it changes (drives the playback
+  // auto-scroll: as advancePlayback bumps selectedScene, the strip follows).
+  useEffect(() => {
+    const el = sceneRefs?.current?.[selectedScene];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }, [selectedScene, sceneRefs]);
+
   return (
     <div ref={wrapperRef} style={{ position: 'relative', width: '100%' }}>
+      {onTogglePlay && (
+        <PlayPauseButton
+          isPlaying={isPlaying}
+          onClick={onTogglePlay}
+          disabled={!canPlay && !isPlaying}
+        />
+      )}
       {showMakeVideo && buttonLeft != null && (
         <button
           type="button"
@@ -231,7 +289,6 @@ const ScenesStrip = ({
                 isDeleting={deletingScenes.has(sceneNumber)}
                 isDragging={dragIndex === index}
                 aspectRatio={aspectRatio}
-                thumbnailTimestamp={thumbnailTimestamps[sceneNumber]}
                 showActionIcons={showActionIcons}
                 canExportClip={canExportClip}
                 draggable

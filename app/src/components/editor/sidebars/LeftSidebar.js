@@ -7,14 +7,6 @@ import GenerateVisualsButton from './GenerateVisualsButton';
 import Divider from '../shared/Divider';
 
 const LeftSidebar = ({
-  baseModel,
-  baseModels,
-  onBaseModelChange,
-  onBaseModelOpen,
-  selectedLora,
-  loraModules,
-  onLoraChange,
-  onLoraOpen,
   falModels,
   selectedFalModel,
   onFalModelChange,
@@ -52,14 +44,6 @@ const LeftSidebar = ({
   >
     <div style={{ display: 'flex', gap: 12, overflowY: 'scroll', flexDirection: 'column', paddingTop: '12px' }}>
       <StyleSection
-        baseModel={baseModel}
-        baseModels={baseModels}
-        onBaseModelChange={onBaseModelChange}
-        onBaseModelOpen={onBaseModelOpen}
-        selectedLora={selectedLora}
-        loraModules={loraModules}
-        onLoraChange={onLoraChange}
-        onLoraOpen={onLoraOpen}
         falModels={falModels}
         selectedFalModel={selectedFalModel}
         onFalModelChange={onFalModelChange}

@@ -116,6 +116,22 @@ module.exports = function createVoiceRouter(pool, requireAuth) {
       const currentVoiceline = String(req.body?.current_voiceline || "")
         .trim()
         .slice(0, 1000);
+      const currentSpeaker = String(req.body?.current_speaker || "")
+        .trim()
+        .slice(0, 100);
+      let availableSpeakers = [];
+      if (req.body?.available_speakers) {
+        try {
+          const parsed = JSON.parse(req.body.available_speakers);
+          if (Array.isArray(parsed)) {
+            availableSpeakers = parsed
+              .filter((s) => typeof s === "string" && s.trim())
+              .slice(0, 32);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
       const context = String(req.body?.context || "").trim().slice(0, 8000);
       const modelId = String(req.body?.model_id || "").trim().slice(0, 200);
       let references = [];
@@ -152,6 +168,8 @@ module.exports = function createVoiceRouter(pool, requireAuth) {
           transcript,
           currentPrompt,
           currentVoiceline,
+          currentSpeaker,
+          availableSpeakers,
           context,
           modelId,
           references,

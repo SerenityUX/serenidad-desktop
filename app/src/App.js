@@ -40,33 +40,46 @@ const MainApp = () => {
   }, [refreshProjects]);
 
   useEffect(() => {
-    if (!token) return undefined;
+    // Register unconditionally so the listener exists even before auth has
+    // hydrated. We check token inside the handler and report a clear error
+    // back to the modal instead of silently dropping the click.
     const unsub = window.electron.ipcRenderer.on(
       "create-project-submit",
       /** Preload forwards only payload args (not the IPC event). */
       async (payload) => {
-        const { projectName, width, height } = payload || {};
-        const w =
-          Number.parseInt(String(width).replace(/\D/g, ""), 10) || 1280;
-        const h =
-          Number.parseInt(String(height).replace(/\D/g, ""), 10) || 720;
+        const reportResult = (result) => {
+          window.electron.ipcRenderer.send("create-project-result", result);
+        };
+
         try {
+          if (!token) {
+            throw new Error(
+              "Not signed in yet — wait for sign-in to finish, then try again.",
+            );
+          }
+          const { projectName, width, height } = payload || {};
+          const trimmedName = String(projectName || "").trim();
+          if (!trimmedName) throw new Error("Project name is required.");
+          const w =
+            Number.parseInt(String(width).replace(/\D/g, ""), 10) || 1280;
+          const h =
+            Number.parseInt(String(height).replace(/\D/g, ""), 10) || 720;
+
           const res = await fetch(apiUrl("/projects"), {
             method: "POST",
             headers: {
               Authorization: `Bearer ${token}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-              name: String(projectName || "").trim(),
-              width: w,
-              height: h,
-            }),
+            body: JSON.stringify({ name: trimmedName, width: w, height: h }),
           });
           const body = await res.json().catch(() => ({}));
           if (!res.ok) {
-            throw new Error(body.error || "Could not create project");
+            throw new Error(
+              body.error || `Could not create project (HTTP ${res.status})`,
+            );
           }
+          reportResult({ ok: true });
           window.electron.ipcRenderer.send("close-modal");
           await refreshProjects();
           await window.electron.openProjectWindow({
@@ -75,7 +88,10 @@ const MainApp = () => {
           });
         } catch (err) {
           console.error(err);
-          window.alert(err.message || "Create failed");
+          reportResult({
+            ok: false,
+            error: String(err?.message || "Create failed"),
+          });
         }
       },
     );

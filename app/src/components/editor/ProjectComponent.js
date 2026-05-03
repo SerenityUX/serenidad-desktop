@@ -1,15 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { debounce } from 'lodash';
-import { useInterval } from 'react-use';
-import ollama from 'ollama/browser';
 
 import animeFacts from '../../data/animeFacts.json';
 import { apiUrl } from '../../config';
 import EditorLayout from './EditorLayout';
-import ComposeLayout from './ComposeLayout';
+import { VOICE_OPTIONS } from './stage/VoiceLineBar';
 import ShareModal from './ShareModal';
 import ProjectLoadingSkeleton from './ProjectLoadingSkeleton';
 import { composeSceneToPng } from '../../lib/composeScene';
+import { encodeSegmentsToMp4 } from '../../lib/exportProject';
 import useVoicePrompt from '../../hooks/useVoicePrompt';
 
 const DEFAULT_IMAGE_DURATION = 2;
@@ -74,11 +73,8 @@ const weightToLabel = (weight) => {
 };
 
 const ProjectComponent = ({ projectId }) => {
-  const isRemote = Boolean(projectId);
-  // Mode flags
-  const [composeMode, setComposeMode] = useState(false);
-  const [composeComplete, setComposeComplete] = useState(false);
-  const [storyboardMode, setStoryboardMode] = useState(false);
+  // Cloud-only mode. The launcher bails before mount if no projectId.
+  const isRemote = true;
 
   // Project data + selection
   const [projectData, setProjectData] = useState(null);
@@ -93,23 +89,10 @@ const ProjectComponent = ({ projectId }) => {
   const [imgW, setImgW] = useState(0);
   const [imgH, setImgH] = useState(0);
   const [videoKey, setVideoKey] = useState(null);
-  const [thumbnailTimestamps, setThumbnailTimestamps] = useState({});
-
-  // Compose mode
-  const [composeUserInput, setComposeUserInput] = useState('');
-  const [composeSubmitted, setComposeSubmitted] = useState(false);
-  const [enrichedStory, setEnrichedStory] = useState('');
-  const [characters, setCharacters] = useState([]);
 
   // Voice
   const [voiceText, setVoiceText] = useState('');
   const [speakerWav, setSpeakerWav] = useState('Narrator');
-
-  // Models
-  const [baseModel, setBaseModel] = useState('');
-  const [selectedLora, setSelectedLora] = useState('');
-  const [baseModels, setBaseModels] = useState([]);
-  const [loraModules, setLoraModules] = useState([]);
 
   // Prompt
   const [prompt, setPrompt] = useState('');
@@ -232,10 +215,6 @@ const ProjectComponent = ({ projectId }) => {
   }, [authToken, projectId]);
 
   useEffect(() => {
-    if (!isRemote) {
-      setAuthResolved(true);
-      return undefined;
-    }
     let cancelled = false;
     (async () => {
       try {
@@ -252,7 +231,7 @@ const ProjectComponent = ({ projectId }) => {
     return () => {
       cancelled = true;
     };
-  }, [isRemote]);
+  }, []);
 
   useEffect(() => {
     if (!isRemote || !projectId || !authToken) return undefined;
@@ -291,60 +270,6 @@ const ProjectComponent = ({ projectId }) => {
       cancelled = true;
     };
   }, [isRemote, projectId, authToken]);
-
-  // ---------- Compose: enrich story via ollama ----------
-  const fetchEnrichment = async () => {
-    const message = {
-      role: 'user',
-      content: `Please enrich my story by giving it specific details about specific actions taking place and a start, rising action, and climax and very specific characters. Do not use nicknames and always only refer to people by their first name (not their title or by mrs or mr. or miss.). Respond with nothing but the enriched version: ${composeUserInput}.`,
-    };
-    const response = await ollama.chat({ model: 'llama3.1', messages: [message], stream: true });
-    let output = '';
-    for await (const part of response) {
-      output += part.message.content;
-      setEnrichedStory(output);
-    }
-
-    const characterMessage = {
-      role: 'user',
-      content: `Please provide a comma-separated list of the characters' names from the previous response for every character in the story. Make sure to not repeat characters & only include them by their normal name (not nickname). Respond with nothing but the character comma separated list and no clarifying message before or after. No clarifications or notes.    ${output}`,
-    };
-    const characterResponse = await ollama.chat({ model: 'llama3.1', messages: [characterMessage], stream: true });
-    let characterOutput = '';
-    for await (const part of characterResponse) {
-      characterOutput += part.message.content;
-    }
-    const uniqueCharacters = [...new Set(characterOutput.split(',').map((name) => name.trim()))];
-    const characterObjects = uniqueCharacters.map((name) => ({ name, plotDescription: '', visualDescription: '' }));
-    setCharacters(characterObjects);
-
-    for (let i = 0; i < characterObjects.length; i++) {
-      const character = characterObjects[i];
-      const plotMessage = {
-        role: 'user',
-        content: `Please provide me a one sentence plot description of ${character.name}. FOCUS ON JUST THIS CHARACTER AND THEIR ROLE IN THE STORY, NOT THE ENVIRONMENT. Do not provide any sort of clarification to your message like: "Here's the plot description" respond with only the sentence. Here's the story: ${output}`,
-      };
-      const characterPlotDescription = await ollama.chat({ model: 'llama3.1', messages: [plotMessage] });
-      const plotDescription = characterPlotDescription.message.content;
-      setCharacters((prev) =>
-        prev.map((item) => (item.name === character.name ? { ...item, plotDescription } : item)),
-      );
-    }
-
-    for (let i = 0; i < characterObjects.length; i++) {
-      const character = characterObjects[i];
-      const visualMessage = {
-        role: 'user',
-        content: `Please provide me a keyword comma separated visual descripton (for a stable diffusion 1.5 prompt) of ${character.name}. DO NOT DESCRIBE THEIR ENVIRONMENT BUT RATHER ONLY SPECIFIC VISUAL FEATURES OF THE CHARACTER GENERALIZABLE THROUGHOUT TIME. Do not provide any sort of clarification to your message like: "Here's the visual description" respond with only the comma separated list of specific visual keywords that decide things like their gender, age, race (white, black, asian, hispanic, native american, middle eastern, indian, etc) (or if a non-human creature then mention the creature type and the color of the create like blue, green, orange, yellow, red, etc), hair color, eye color, outfit, etc based on the role they play in the story. ONLY VISUALS, NOTHING PLOT-RELATED. Here's the story: ${output}`,
-      };
-      const characterVisualDescription = await ollama.chat({ model: 'llama3.1', messages: [visualMessage] });
-      const visualDescription = characterVisualDescription.message.content;
-      setCharacters((prev) =>
-        prev.map((item) => (item.name === character.name ? { ...item, visualDescription } : item)),
-      );
-    }
-    setComposeComplete(true);
-  };
 
   const copyImageToClipboard = useCallback(async (url) => {
     try {
@@ -657,10 +582,6 @@ const ProjectComponent = ({ projectId }) => {
 
   // ---------- Image generation ----------
   const generateImage = async (sceneIndex) => {
-    if (!isRemote) {
-      window.alert('Local GPU generation is disabled for cloud-backed projects in this build.');
-      return;
-    }
     const scene = projectData?.scenes?.[sceneIndex - 1];
     if (!scene?.frameId || !authToken || !projectId) return;
     const promptText = String(prompt || '').trim();
@@ -1012,41 +933,6 @@ const ProjectComponent = ({ projectId }) => {
       .catch((error) => console.error('Failed to add new scene:', error));
   };
 
-  useEffect(() => {
-    const handleProgressUpdate = (event, sceneIndex, progressPercent) => {
-      setProgressMap((prev) => ({ ...prev, [event]: sceneIndex }));
-      setProgressMessageMap((prev) => ({ ...prev, [event]: `${sceneIndex}% Complete` }));
-      if (parseInt(sceneIndex) >= 95) {
-        setTimeout(() => {
-          setCurrentlyLoading((prev) => prev.filter((scene) => scene !== event));
-          setGenerateImageText((prev) => ({ ...prev, [event]: 'Generate Visuals' }));
-        }, 2000);
-      }
-    };
-
-    const handleModelResponse = (event, sceneIndex, response) => {
-      if (sceneIndex.success === false && sceneIndex.message !== 'Process exited with code 1') {
-        alert(sceneIndex.message);
-        setCurrentlyLoading((prev) => prev.filter((scene) => scene !== event));
-      }
-      if (response.success) {
-        setProgressMessageMap((prev) => ({ ...prev, [sceneIndex]: 'Generation Complete!' }));
-        setCurrentlyLoading((prev) => prev.filter((scene) => scene !== sceneIndex));
-        setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generate Visuals' }));
-      } else {
-        setProgressMessageMap((prev) => ({ ...prev, [sceneIndex]: 'Generation Failed!' }));
-        setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generate Visuals' }));
-      }
-    };
-
-    window.electron.on('progress-update', handleProgressUpdate);
-    window.electron.on('run-model-response', handleModelResponse);
-    return () => {
-      window.electron.off('progress-update', handleProgressUpdate);
-      window.electron.off('run-model-response', handleModelResponse);
-    };
-  }, []);
-
   const startGenerationForScene = (sceneIndex) => {
     setCurrentlyLoading((prev) => [...prev, sceneIndex]);
     setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generating' }));
@@ -1091,10 +977,6 @@ const ProjectComponent = ({ projectId }) => {
         setSelectedFalModel(currentScene.model || defaultFalModelId);
         setVoiceText(currentScene.voiceline || '');
         setSpeakerWav(currentScene.speaker || 'Narrator');
-        fetchBaseModels();
-        fetchLoraModules();
-        setBaseModel(currentScene.baseModel || baseModels[0]);
-        setSelectedLora(currentScene.selectedLora || loraModules[0]);
 
         setCaptionSettings((prev) => ({
           ...prev,
@@ -1329,25 +1211,6 @@ const ProjectComponent = ({ projectId }) => {
     [selectedScene, projectData, patchFrame, authToken],
   );
 
-  const updateSceneModelSettings = useCallback(
-    debounce((baseModelValue, selectedLoraValue) => {
-      const scene = projectData?.scenes?.[selectedScene - 1];
-      if (!scene?.frameId || !authToken) return;
-      patchFrame(scene.frameId, {
-        meta: { baseModel: baseModelValue, selectedLora: selectedLoraValue },
-      }).catch((error) => console.error('Failed to update scene model settings:', error));
-      setProjectData((prev) => ({
-        ...prev,
-        scenes: prev.scenes.map((s, i) =>
-          i === selectedScene - 1
-            ? { ...s, baseModel: baseModelValue, selectedLora: selectedLoraValue }
-            : s,
-        ),
-      }));
-    }, 500),
-    [selectedScene, projectData, patchFrame, authToken],
-  );
-
   // ---------- Form change handlers ----------
   const handlePromptChange = (event) => {
     const newPrompt = event.target.value;
@@ -1368,25 +1231,35 @@ const ProjectComponent = ({ projectId }) => {
   );
 
   const handleVoiceUpdate = useCallback(
-    ({ voiceline, prompt: newPrompt, editorResponse }) => {
+    ({ voiceline, prompt: newPrompt, speaker, editorResponse }) => {
+      const nextSpeaker =
+        speaker && VOICE_OPTIONS.includes(speaker) ? speaker : null;
+      const effectiveSpeaker = nextSpeaker || speakerWav;
+      if (nextSpeaker) {
+        setSpeakerWav(nextSpeaker);
+      }
       const trimmedPrompt = String(newPrompt || '').trim();
-      if (trimmedPrompt) {
+      if (trimmedPrompt && trimmedPrompt !== prompt) {
         setPrompt(trimmedPrompt);
         updateScenePrompts(trimmedPrompt);
       }
       if (typeof voiceline === 'string') {
         const trimmedVoiceline = voiceline.trim();
         setVoiceText(trimmedVoiceline);
-        updateSceneVoiceline(trimmedVoiceline, speakerWav);
+        updateSceneVoiceline(trimmedVoiceline, effectiveSpeaker);
         if (trimmedVoiceline) {
           applyVoicelineToCaptionIfEmpty(trimmedVoiceline);
         }
+      } else if (nextSpeaker) {
+        updateSceneVoiceline(voiceText, effectiveSpeaker);
       }
       if (editorResponse) {
         console.log('[voice] editor:', editorResponse);
       }
     },
     [
+      prompt,
+      voiceText,
       updateScenePrompts,
       updateSceneVoiceline,
       speakerWav,
@@ -1399,6 +1272,8 @@ const ProjectComponent = ({ projectId }) => {
     getAuthToken: () => authToken,
     getCurrentPrompt: () => prompt,
     getCurrentVoiceline: () => voiceText,
+    getCurrentSpeaker: () => speakerWav,
+    getAvailableSpeakers: () => VOICE_OPTIONS,
     getModelId: () => selectedFalModel,
     getReferences: () =>
       (references || [])
@@ -1561,58 +1436,6 @@ const ProjectComponent = ({ projectId }) => {
   const handleCaptionChange = (event) => setLocalCaption(event.target.value);
   const handleCaptionBlur = () => updateCaptionSettings({ caption: localCaption });
 
-  // ---------- Models (local GPU weights only; cloud projects skip) ----------
-  const fetchBaseModels = useCallback(async () => {
-    if (isRemote) {
-      setBaseModels([]);
-      return;
-    }
-    try {
-      const models = await window.electron.ipcRenderer.invoke('get-base-models');
-      setBaseModels(models);
-    } catch (error) {
-      console.error('Failed to fetch base models:', error);
-    }
-  }, [isRemote]);
-
-  const fetchLoraModules = useCallback(async () => {
-    if (isRemote) {
-      setLoraModules([]);
-      return;
-    }
-    try {
-      const modules = await window.electron.ipcRenderer.invoke('get-lora-modules');
-      setLoraModules(modules);
-    } catch (error) {
-      console.error('Failed to fetch LoRA modules:', error);
-    }
-  }, [isRemote]);
-
-  useEffect(() => {
-    fetchBaseModels();
-    fetchLoraModules();
-  }, [fetchBaseModels, fetchLoraModules]);
-
-  const handleBaseModelChange = async (event) => {
-    const newBaseModel = event.target.value;
-    if (newBaseModel === 'manage') {
-      window.electron.ipcRenderer.send('open-manage-window', 'baseModel');
-    } else {
-      setBaseModel(newBaseModel);
-      updateSceneModelSettings(newBaseModel, selectedLora);
-    }
-  };
-
-  const handleLoraChange = async (event) => {
-    const newSelectedLora = event.target.value;
-    if (newSelectedLora === 'manage') {
-      window.electron.ipcRenderer.send('open-manage-window', 'lora');
-    } else {
-      setSelectedLora(newSelectedLora);
-      updateSceneModelSettings(baseModel, newSelectedLora);
-    }
-  };
-
   // ---------- Random anime fact per scene ----------
   useEffect(() => {
     setCurrentFact(animeFacts[Math.floor(Math.random() * animeFacts.length)]);
@@ -1628,17 +1451,18 @@ const ProjectComponent = ({ projectId }) => {
   }, []);
 
   const advancePlayback = useCallback(() => {
-    const total = projectData?.scenes?.length || 0;
-    if (!total) {
+    const scenes = projectData?.scenes || [];
+    if (!scenes.length) {
       stopPlayback();
       return;
     }
     setSelectedScene((prev) => {
-      if (prev >= total) {
-        stopPlayback();
-        return prev;
+      // Step forward to the next scene that actually has media; stop if none.
+      for (let i = prev + 1; i <= scenes.length; i += 1) {
+        if (scenes[i - 1]?.thumbnail) return i;
       }
-      return prev + 1;
+      stopPlayback();
+      return prev;
     });
   }, [projectData, stopPlayback]);
 
@@ -1647,9 +1471,16 @@ const ProjectComponent = ({ projectId }) => {
       stopPlayback();
       return;
     }
-    if (!projectData?.scenes?.length) return;
+    const scenes = projectData?.scenes || [];
+    if (!scenes.length) return;
+    // If the currently selected scene has no media, jump to the first that does.
+    if (!scenes[selectedScene - 1]?.thumbnail) {
+      const firstWithMedia = scenes.findIndex((s) => s?.thumbnail);
+      if (firstWithMedia === -1) return;
+      setSelectedScene(firstWithMedia + 1);
+    }
     setIsPlaying(true);
-  }, [isPlaying, stopPlayback, projectData]);
+  }, [isPlaying, stopPlayback, projectData, selectedScene]);
 
   // While playing on an image scene, hold for its duration then advance.
   // Video scenes self-advance via the <video> onEnded handler.
@@ -1676,35 +1507,34 @@ const ProjectComponent = ({ projectId }) => {
 
   // ---------- Export ----------
   useEffect(() => {
-    const checkExportability = async () => {
-      if (isRemote) {
-        const scene = projectData?.scenes?.[selectedScene - 1];
-        setCanExportClip(Boolean(scene?.thumbnail));
-        return;
-      }
-      if (projectData && projectData.scenes[selectedScene - 1]) {
-        const scene = projectData.scenes[selectedScene - 1];
-        const mp4Path = '';
-        const pngPath = scene.thumbnail;
-        const mp4Exists = await window.electron.ipcRenderer.invoke('check-file-exists', mp4Path);
-        const pngExists = await window.electron.ipcRenderer.invoke('check-file-exists', pngPath);
-        setCanExportClip(mp4Exists || pngExists);
-      }
-    };
-    checkExportability();
-  }, [projectData, selectedScene, isRemote]);
+    const scene = projectData?.scenes?.[selectedScene - 1];
+    setCanExportClip(Boolean(scene?.thumbnail));
+  }, [projectData, selectedScene]);
 
+  const [exportProgress, setExportProgress] = useState(null);
+
+  /**
+   * Pick a save path first (dialog opens immediately on click), then encode
+   * via WebCodecs offline, then write the resulting mp4 to that path. The
+   * encoder runs at full project resolution and is frame-accurate, so the
+   * output matches what the user sees.
+   */
   const exportScenesAsMp4 = async (scenes, suggestedName) => {
     const w = imgW || 1280;
     const h = imgH || 720;
+
+    const targetPath = await window.electron.ipcRenderer.invoke('pick-export-path', {
+      suggestedName,
+      extension: 'mp4',
+    });
+    if (!targetPath) return null;
+
     const segments = [];
     for (const s of scenes) {
       const durationSeconds =
         Number(s.durationSeconds) ||
         (s.kind === 'video' ? DEFAULT_VIDEO_DURATION : DEFAULT_IMAGE_DURATION);
       if (s.kind === 'video') {
-        // Use the source video as-is (its natural duration). Caption overlays
-        // for video segments are not baked in this pass.
         segments.push({ kind: 'video', src: s.thumbnail, durationSeconds });
       } else {
         // eslint-disable-next-line no-await-in-loop
@@ -1712,30 +1542,27 @@ const ProjectComponent = ({ projectId }) => {
         segments.push({ kind: 'image', dataUrl: png, durationSeconds });
       }
     }
-    return window.electron.ipcRenderer.invoke('export-project-mp4', {
-      segments,
-      width: w,
-      height: h,
-      suggestedName,
-    });
+
+    setExportProgress(0);
+    try {
+      const buffer = await encodeSegmentsToMp4(segments, {
+        width: w,
+        height: h,
+        onProgress: (p) => setExportProgress(p),
+      });
+      return await window.electron.ipcRenderer.invoke('write-export-buffer', {
+        path: targetPath,
+        buffer,
+      });
+    } finally {
+      setExportProgress(null);
+    }
   };
 
   const handleExportClip = async () => {
-    if (!isRemote) {
-      if (!canExportClip) return;
-      const scene = projectData.scenes[selectedScene - 1];
-      try {
-        const exportPath = await window.electron.ipcRenderer.invoke('export-clip', '', scene.thumbnail, selectedScene);
-        if (exportPath) console.log(`Clip exported successfully to: ${exportPath}`);
-      } catch (error) {
-        console.error('Failed to export clip:', error);
-      }
-      return;
-    }
     if (!canExportClip || !projectData) return;
     const scene = projectData.scenes[selectedScene - 1];
     if (!scene?.thumbnail) return;
-    // Use the live caption text the user just typed even if not yet saved.
     const sceneWithLive = {
       ...scene,
       captionSettings: {
@@ -1745,8 +1572,7 @@ const ProjectComponent = ({ projectId }) => {
       },
     };
     try {
-      const out = await exportScenesAsMp4([sceneWithLive], `Scene_${selectedScene}.mp4`);
-      if (out) console.log('Clip exported to', out);
+      await exportScenesAsMp4([sceneWithLive], `Scene_${selectedScene}.mp4`);
     } catch (e) {
       console.error('Failed to export clip:', e);
       window.alert(e.message || 'Export failed');
@@ -1754,12 +1580,6 @@ const ProjectComponent = ({ projectId }) => {
   };
 
   const handleExportProject = async () => {
-    if (!isRemote) {
-      window.electron.ipcRenderer.invoke('render-project', '')
-        .then(() => console.log('Rendering completed and opened in Finder.'))
-        .catch((error) => console.error('Error rendering project:', error));
-      return;
-    }
     if (!projectData?.scenes?.length) return;
     const scenes = projectData.scenes
       .map((s, i) =>
@@ -1774,93 +1594,37 @@ const ProjectComponent = ({ projectId }) => {
             }
           : s,
       )
+      // Skip scenes that have no generated media — they'd show as black.
       .filter((s) => s.thumbnail);
     if (scenes.length === 0) {
       window.alert('Generate a visual on at least one scene before exporting.');
       return;
     }
     try {
-      const out = await exportScenesAsMp4(scenes, `${projectData.name || 'project'}.mp4`);
-      if (out) console.log('Project exported to', out);
+      await exportScenesAsMp4(scenes, `${projectData.name || 'project'}.mp4`);
     } catch (e) {
       console.error('Failed to export project:', e);
       window.alert(e.message || 'Export failed');
     }
   };
 
-  // ---------- Thumbnail freshness polling (local files only) ----------
-  useInterval(() => {
-    if (isRemote) return;
-    if (projectData && projectData.scenes) {
-      projectData.scenes.forEach(async (scene, index) => {
-        const lastModified = await window.electron.ipcRenderer.invoke('check-file-updated', scene.thumbnail);
-        if (lastModified) {
-          setThumbnailTimestamps((prev) => ({ ...prev, [index + 1]: lastModified }));
-        }
-      });
-    }
-  }, 1000);
-
-  // ---------- Image generation error events ----------
-  useEffect(() => {
-    const handleImageGenerationError = (event, data) => {
-      alert(`Image generation failed: ${data.errorMessage}`);
-      setCurrentlyLoading((prev) => prev.filter((scene) => scene !== data.sceneIndex));
-      setGenerateImageText((prev) => ({ ...prev, [data.sceneIndex]: 'Generate Visuals' }));
-    };
-    window.electron.on('image-generation-error', handleImageGenerationError);
-    return () => window.electron.off('image-generation-error', handleImageGenerationError);
-  }, []);
-
   // ---------- Render ----------
-  if (isRemote) {
-    if (!authResolved) {
-      return (
-        <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>Loading…</div>
-      );
-    }
-    if (!authToken) {
-      return (
-        <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
-          Could not read your session. Close this window and open the project from the launcher again.
-        </div>
-      );
-    }
-    if (!projectId) {
-      return (
-        <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
-          Missing project id in the URL.
-        </div>
-      );
-    }
-    if (!projectData) {
-      return <ProjectLoadingSkeleton />;
-    }
+  if (!authResolved) {
+    return <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>Loading…</div>;
   }
-
-  if (composeMode) {
+  if (!authToken) {
     return (
-      <ComposeLayout
-        storyboardMode={storyboardMode}
-        composeUserInput={composeUserInput}
-        onComposeInputChange={setComposeUserInput}
-        composeSubmitted={composeSubmitted}
-        onSubmitStory={() => {
-          setComposeSubmitted(true);
-          fetchEnrichment();
-        }}
-        enrichedStory={enrichedStory}
-        characters={characters}
-        composeComplete={composeComplete}
-        onGenerateStoryboard={() => setStoryboardMode(true)}
-      />
+      <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
+        Could not read your session. Close this window and open the project from the launcher again.
+      </div>
     );
+  }
+  if (!projectData) {
+    return <ProjectLoadingSkeleton />;
   }
 
   const generateDisabled =
-    prompt.trim() === '' ||
-    currentlyLoading.includes(selectedScene) ||
-    (!isRemote && baseModels.length === 0 && loraModules.length === 0);
+    prompt.trim() === '' || currentlyLoading.includes(selectedScene);
 
   const currentScene = projectData?.scenes?.[selectedScene - 1];
   const isVideoFrame = currentScene?.kind === 'video';
@@ -1888,18 +1652,8 @@ const ProjectComponent = ({ projectId }) => {
       onShare={() => setShareOpen(true)}
       showShare={isRemote && Boolean(authToken)}
       voice={voice}
-      isPlaying={isPlaying}
-      onTogglePlay={togglePlayback}
-      canPlay={Boolean(projectData?.scenes?.length)}
+      projectName={projectData?.name}
       leftSidebarProps={{
-        baseModel,
-        baseModels,
-        onBaseModelChange: handleBaseModelChange,
-        onBaseModelOpen: fetchBaseModels,
-        selectedLora,
-        loraModules,
-        onLoraChange: handleLoraChange,
-        onLoraOpen: fetchLoraModules,
         falModels: isVideoFrame ? falVideoModels : falModels,
         selectedFalModel,
         onFalModelChange: handleFalModelChange,
@@ -1943,9 +1697,7 @@ const ProjectComponent = ({ projectId }) => {
           onPromptChange: handlePromptChange,
           generateDisabled: isVideoFrame
             ? (creatingVideo || prompt.trim() === '' || !currentScene?.references?.length)
-            : (prompt.trim() === '' ||
-               currentlyLoading.includes(selectedScene) ||
-               (!isRemote && baseModels.length === 0 && loraModules.length === 0)),
+            : (prompt.trim() === '' || currentlyLoading.includes(selectedScene)),
           onGenerate: isVideoFrame
             ? () => generateVideoForCurrentFrame()
             : () => startGenerationForScene(selectedScene),
@@ -2000,12 +1752,14 @@ const ProjectComponent = ({ projectId }) => {
       scenesStripProps={{
         projectData,
         selectedScene,
+        isPlaying,
+        onTogglePlay: togglePlayback,
+        canPlay: Boolean(projectData?.scenes?.length),
         pressedScene,
         isMouseDown,
         deletingScenes,
         currentlyLoading,
         thumbnail,
-        thumbnailTimestamps,
         aspectRatio: projectAspectRatio,
         canExportClip,
         sceneRefs,
@@ -2057,6 +1811,52 @@ const ProjectComponent = ({ projectId }) => {
         authToken={authToken}
         onClose={() => setShareOpen(false)}
       />
+    ) : null}
+    {exportProgress != null ? (
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.45)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}
+      >
+        <div
+          style={{
+            backgroundColor: '#fff',
+            borderRadius: 10,
+            padding: '20px 24px',
+            minWidth: 280,
+            boxShadow: '0 8px 30px rgba(0,0,0,0.25)',
+            fontFamily: 'system-ui, sans-serif',
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>
+            Exporting… {Math.round(exportProgress * 100)}%
+          </div>
+          <div
+            style={{
+              width: '100%',
+              height: 6,
+              backgroundColor: '#EEE',
+              borderRadius: 3,
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.round(exportProgress * 100)}%`,
+                height: '100%',
+                backgroundColor: '#1F93FF',
+                transition: 'width 80ms linear',
+              }}
+            />
+          </div>
+        </div>
+      </div>
     ) : null}
     </>
   );

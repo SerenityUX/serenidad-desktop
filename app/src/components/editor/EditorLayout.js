@@ -10,6 +10,7 @@ const EditorLayout = ({
   onShare,
   showShare = false,
   voice,
+  projectName,
   leftSidebarProps,
   centerStageProps,
   rightSidebarProps,
@@ -26,7 +27,7 @@ const EditorLayout = ({
     alignItems: 'center',
     justifyContent: 'space-between',
   }}>
-    <TitleBar onExport={onExport} onShare={onShare} showShare={showShare} voice={voice} />
+    <TitleBar onExport={onExport} onShare={onShare} showShare={showShare} voice={voice} projectName={projectName} />
 
     <div style={{ display: 'flex', width: '100%', height: 'calc(100% - 175px)' }}>
       <LeftSidebar {...leftSidebarProps} />

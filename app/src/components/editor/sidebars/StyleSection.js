@@ -1,5 +1,4 @@
 import React from 'react';
-import { Tooltip } from 'react-tooltip';
 import SectionHeader from '../shared/SectionHeader';
 import FieldLabel from '../shared/FieldLabel';
 
@@ -25,20 +24,11 @@ const helperStyle = {
 };
 
 const StyleSection = ({
-  baseModel,
-  baseModels,
-  onBaseModelChange,
-  onBaseModelOpen,
-  selectedLora,
-  loraModules,
-  onLoraChange,
-  onLoraOpen,
   falModels,
   selectedFalModel,
   onFalModelChange,
 }) => {
   const showFal = Array.isArray(falModels) && falModels.length > 0;
-  const showLocal = Array.isArray(baseModels) && baseModels.length > 0;
   const activeFalModel =
     showFal && falModels.find((m) => m.id === selectedFalModel);
 
@@ -80,42 +70,6 @@ const StyleSection = ({
             }
             return msg ? <div style={helperStyle}>{msg}</div> : null;
           })()}
-        </div>
-      )}
-
-      {showLocal && (
-        <div
-          data-tooltip-id="base-model-tooltip"
-          data-tooltip-content="A base model is a pre-trained AI model that serves as the foundation for generating images."
-          style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}
-        >
-          <FieldLabel>BASE MODEL</FieldLabel>
-          <select value={baseModel} onChange={onBaseModelChange} onClick={onBaseModelOpen} style={selectStyle}>
-            {baseModels.map((model) => (
-              <option key={model} value={model}>{model}</option>
-            ))}
-            <option value="manage">Manage Base Models</option>
-          </select>
-        </div>
-      )}
-
-      {showLocal && (
-        <div
-          data-tooltip-id="lora-model-tooltip"
-          data-tooltip-content="A LoRA module fine-tunes a base model for specific styles or subjects."
-          style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}
-        >
-          <FieldLabel>LORA MODULE</FieldLabel>
-          <select value={selectedLora} onChange={onLoraChange} onClick={onLoraOpen} style={selectStyle}>
-            {loraModules.length === 0 && <option>Select LoRa</option>}
-            {loraModules.map((module) => (
-              <option key={module} value={module}>{module}</option>
-            ))}
-            <option value="manage">Manage LoRa Modules</option>
-          </select>
-          {loraModules.length === 0 && (
-            <Tooltip id="lora-model-tooltip" place="top" type="dark" effect="solid" style={{ maxWidth: '300px' }} />
-          )}
         </div>
       )}
     </div>

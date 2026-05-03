@@ -70,21 +70,72 @@
 </div>
 
       </div>
+      <p id="errorBox" style="display: none; color: #C0392B; font-size: 11px; margin-top: 8px; line-height: 1.3; white-space: pre-wrap; word-wrap: break-word; font-weight: 500;"></p>
     </div>
   </div>
   <script>
-    document.getElementById('createProjectBtn').addEventListener('click', async function() {
-      const projectName = document.getElementById('projectName').value;
-      const projectFolder = document.getElementById('projectFolder').value;
+    const btn = document.getElementById('createProjectBtn');
+    const errorBox = document.getElementById('errorBox');
+    let pending = false;
+
+    function setBusy(busy) {
+      pending = busy;
+      btn.disabled = busy;
+      btn.style.opacity = busy ? 0.6 : 1;
+      btn.style.cursor = busy ? 'not-allowed' : 'pointer';
+      btn.textContent = busy ? 'Creating…' : 'Create Project';
+    }
+
+    function showError(message) {
+      errorBox.textContent = message || 'Something went wrong.';
+      errorBox.style.display = 'block';
+    }
+
+    function clearError() {
+      errorBox.textContent = '';
+      errorBox.style.display = 'none';
+    }
+
+    if (!window.electron || !window.electron.ipcRenderer) {
+      // The IPC bridge didn't load — without this we'd silently no-op on click.
+      showError('Internal error: IPC bridge missing. Restart the app.');
+      btn.disabled = true;
+    } else {
+      window.electron.ipcRenderer.on('create-project-result', (result) => {
+        setBusy(false);
+        if (result && result.ok) {
+          clearError();
+        } else {
+          showError(result && result.error ? result.error : 'Create failed.');
+        }
+      });
+    }
+
+    btn.addEventListener('click', async function() {
+      if (pending) return;
+      clearError();
+      const projectName = document.getElementById('projectName').value.trim();
+      const projectFolder = document.getElementById('projectFolder').value.trim();
       const width = document.getElementById('widthInput').value;
       const height = document.getElementById('heightInput').value;
 
-      window.electron.send('create-project-from-modal', {
-        projectName,
-        projectFolder,
-        width,
-        height,
-      });
+      if (!projectName) {
+        showError('Project name is required.');
+        return;
+      }
+
+      setBusy(true);
+      try {
+        window.electron.ipcRenderer.send('create-project-from-modal', {
+          projectName,
+          projectFolder,
+          width,
+          height,
+        });
+      } catch (e) {
+        setBusy(false);
+        showError((e && e.message) || 'Could not send request.');
+      }
     });
     
 function updateInput(el) {

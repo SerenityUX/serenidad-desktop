@@ -19,7 +19,6 @@ const SceneThumbnail = ({
   isHidden,
   isDragging,
   aspectRatio,
-  thumbnailTimestamp,
   showActionIcons,
   canExportClip,
   draggable,
@@ -150,7 +149,7 @@ const SceneThumbnail = ({
           }
           return (
             <Img
-              src={`${raw}?t=${thumbnailTimestamp || ''}`}
+              src={raw}
               loader={<div style={{ width: '100%', height: '100%', backgroundColor: '#F2F2F2' }} />}
               unloader={<div style={{ width: '100%', height: '100%', backgroundColor: '#F2F2F2' }} />}
               style={{
