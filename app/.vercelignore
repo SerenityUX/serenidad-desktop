@@ -6,7 +6,9 @@ entitlements.plist
 Info.plist
 KodanFlower.icns
 KodanFlower-dock.png
-KodanFlower.png
+# NOTE: do NOT ignore KodanFlower.png — public/KodanFlower.png is the
+# banner logo on the web build. Only the repo-root icns/dock-png are
+# Electron-specific and safe to drop.
 
 # Build outputs and deps Vercel rebuilds anyway.
 dist/
