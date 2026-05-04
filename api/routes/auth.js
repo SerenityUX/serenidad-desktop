@@ -277,61 +277,43 @@ module.exports = function createAuthRouter(pool, requireAuth) {
 
   // 1 token ≈ 1¢ of model spend.
   // Subscription = 20% margin → 80 tokens per $1.
-  // One-time     = 30% margin → 70 tokens per $1.
+  // One-time     = 30% margin → 70 tokens per $1, sold via a single Stripe
+  //               payment link with adjustable quantity (1 unit = $1 = 70 tokens).
   router.get("/token-packages", requireAuth, (req, res) => {
-    const subscription = [
+    const fallback = "https://stripe.com";
+    const subscriptions = [
       {
         id: "sub_starter",
-        kind: "subscription",
         label: "Starter",
         tokens: 800,
         priceLabel: "$10/mo",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_STARTER || "",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_STARTER || fallback,
       },
       {
         id: "sub_creator",
-        kind: "subscription",
         label: "Creator",
         tokens: 2400,
         priceLabel: "$30/mo",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_CREATOR || "",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_CREATOR || fallback,
       },
       {
         id: "sub_studio",
-        kind: "subscription",
         label: "Studio",
         tokens: 12000,
         priceLabel: "$150/mo",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_STUDIO || "",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_STUDIO || fallback,
       },
     ];
-    const oneTime = [
-      {
-        id: "buy_starter",
-        kind: "one_time",
-        label: "Starter",
-        tokens: 700,
-        priceLabel: "$10",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_BUY_STARTER || "",
-      },
-      {
-        id: "buy_creator",
-        kind: "one_time",
-        label: "Creator",
-        tokens: 2100,
-        priceLabel: "$30",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_BUY_CREATOR || "",
-      },
-      {
-        id: "buy_studio",
-        kind: "one_time",
-        label: "Studio",
-        tokens: 10500,
-        priceLabel: "$150",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_BUY_STUDIO || "",
-      },
-    ];
-    res.json({ packages: [...subscription, ...oneTime] });
+    const oneTime = {
+      // Stripe payment link should be configured with adjustable quantity,
+      // unit = $1, sold as 70 tokens per unit.
+      tokensPerUnit: 70,
+      dollarsPerUnit: 1,
+      minDollars: 5,
+      maxDollars: 500,
+      paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_BUY_TOKENS || fallback,
+    };
+    res.json({ subscriptions, oneTime });
   });
 
   router.post(

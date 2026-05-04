@@ -340,14 +340,16 @@ const ActivityRow = ({ tx }) => {
 };
 
 const TokensModal = ({ open, onClose }) => {
-  const { token, user, refreshUser } = useAuth();
+  const { token, user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [balance, setBalance] = useState(user?.tokens ?? 0);
   const [transactions, setTransactions] = useState([]);
-  const [packages, setPackages] = useState([]);
+  const [subscriptions, setSubscriptions] = useState([]);
+  const [oneTime, setOneTime] = useState(null);
   const [billingMode, setBillingMode] = useState('subscription');
   const [activityOpen, setActivityOpen] = useState(false);
+  const [oneTimeDollars, setOneTimeDollars] = useState(10);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -368,9 +370,11 @@ const TokensModal = ({ open, onClose }) => {
       setTransactions(Array.isArray(txBody.transactions) ? txBody.transactions : []);
       if (pkgRes.ok) {
         const pkgBody = await pkgRes.json();
-        setPackages(Array.isArray(pkgBody.packages) ? pkgBody.packages : []);
+        setSubscriptions(Array.isArray(pkgBody.subscriptions) ? pkgBody.subscriptions : []);
+        setOneTime(pkgBody.oneTime || null);
       } else {
-        setPackages([]);
+        setSubscriptions([]);
+        setOneTime(null);
       }
     } catch (e) {
       setError(e.message || 'Failed to load');
@@ -392,14 +396,18 @@ const TokensModal = ({ open, onClose }) => {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  const buy = useCallback(
-    (pkg) => {
-      if (!pkg?.paymentLinkUrl) return;
-      const userId = user?.id || '';
-      const sep = pkg.paymentLinkUrl.includes('?') ? '&' : '?';
-      const url = userId
-        ? `${pkg.paymentLinkUrl}${sep}client_reference_id=${encodeURIComponent(userId)}`
-        : pkg.paymentLinkUrl;
+  const openPaymentLink = useCallback(
+    (linkUrl, extraParams) => {
+      if (!linkUrl) return;
+      const params = new URLSearchParams();
+      if (user?.id) params.set('client_reference_id', String(user.id));
+      if (extraParams) {
+        Object.entries(extraParams).forEach(([k, v]) => {
+          if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
+        });
+      }
+      const sep = linkUrl.includes('?') ? '&' : '?';
+      const url = params.toString() ? `${linkUrl}${sep}${params.toString()}` : linkUrl;
       try {
         platform.openExternal(url);
       } catch (e) {
@@ -490,109 +498,290 @@ const TokensModal = ({ open, onClose }) => {
               })}
             </div>
           </div>
-          <div
-            style={{
-              padding: '0 20px',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-              gap: 8,
-            }}
-          >
-            {(() => {
-              const filtered = packages.filter((p) => p.kind === billingMode);
-              if (filtered.length === 0) {
-                return (
-                  <div style={{ color: '#6B7280', fontSize: 13 }}>
-                    {billingMode === 'subscription'
-                      ? 'No subscription plans configured yet.'
-                      : 'No token packs configured yet.'}
+          {billingMode === 'subscription' ? (
+            <div
+              style={{
+                padding: '0 20px',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                gap: 8,
+              }}
+            >
+              {subscriptions.length === 0 ? (
+                <div style={{ color: '#6B7280', fontSize: 13 }}>
+                  No subscription plans configured yet.
+                </div>
+              ) : (
+                subscriptions.map((pkg) => (
+                  <div
+                    key={pkg.id}
+                    style={{
+                      border: '1px solid #E2E2E2',
+                      background: '#fff',
+                      borderRadius: 10,
+                      padding: 12,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: '#111' }}>{pkg.label}</div>
+                    <div style={{ color: '#F97316', fontWeight: 600 }}>
+                      ✻ {pkg.tokens.toLocaleString()}
+                    </div>
+                    <div style={{ color: '#6B7280', fontSize: 12 }}>{pkg.priceLabel}</div>
+                    <div
+                      style={{
+                        marginTop: 6,
+                        paddingTop: 6,
+                        borderTop: '1px solid #F3F4F6',
+                        color: '#6B7280',
+                        fontSize: 11,
+                        lineHeight: 1.55,
+                      }}
+                    >
+                      <div>~{Math.round(pkg.tokens / 4).toLocaleString()} images</div>
+                      <div>~{Math.round(pkg.tokens / 10).toLocaleString()}s of video</div>
+                      <div>{pkg.tokens.toLocaleString()} voice prompts</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openPaymentLink(pkg.paymentLinkUrl)}
+                      disabled={!pkg.paymentLinkUrl}
+                      style={{
+                        marginTop: 10,
+                        border: 'none',
+                        background: pkg.paymentLinkUrl ? '#F97316' : '#E5E7EB',
+                        color: pkg.paymentLinkUrl ? '#fff' : '#9CA3AF',
+                        fontWeight: 600,
+                        fontSize: 12,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        cursor: pkg.paymentLinkUrl ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      Upgrade
+                    </button>
                   </div>
-                );
-              }
-              return filtered.map((pkg) => (
-                <button
-                  key={pkg.id}
-                  type="button"
-                  onClick={() => buy(pkg)}
+                ))
+              )}
+            </div>
+          ) : (
+            (() => {
+              const cfg = oneTime || {
+                tokensPerUnit: 70,
+                dollarsPerUnit: 1,
+                minDollars: 5,
+                maxDollars: 500,
+                paymentLinkUrl: '',
+              };
+              const dollars = Math.max(
+                cfg.minDollars,
+                Math.min(cfg.maxDollars, oneTimeDollars || cfg.minDollars),
+              );
+              const quantity = Math.round(dollars / cfg.dollarsPerUnit);
+              const tokens = quantity * cfg.tokensPerUnit;
+              return (
+                <div
                   style={{
+                    margin: '0 20px',
                     border: '1px solid #E2E2E2',
-                    background: '#fff',
                     borderRadius: 10,
-                    padding: '12px 12px',
-                    textAlign: 'left',
-                    cursor: 'pointer',
+                    padding: 14,
+                    background: '#fff',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 4,
+                    gap: 12,
                   }}
                 >
-                  <div style={{ fontWeight: 600, color: '#111' }}>{pkg.label}</div>
-                  <div style={{ color: '#F97316', fontWeight: 600 }}>
-                    ✻ {pkg.tokens.toLocaleString()}
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                    <div>
+                      <div style={{ color: '#F97316', fontWeight: 700, fontSize: 18 }}>
+                        ✻ {tokens.toLocaleString()}
+                      </div>
+                      <div style={{ color: '#6B7280', fontSize: 12, marginTop: 2 }}>
+                        ~{Math.round(tokens / 4).toLocaleString()} images ·{' '}
+                        ~{Math.round(tokens / 10).toLocaleString()}s of video ·{' '}
+                        {tokens.toLocaleString()} voice prompts
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: '#111' }}>
+                        ${dollars}
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ color: '#6B7280', fontSize: 12 }}>{pkg.priceLabel}</div>
-                </button>
-              ));
-            })()}
-          </div>
 
-          <button
-            type="button"
-            onClick={() => setActivityOpen((v) => !v)}
+                  <div style={{ padding: '0 8px' }}>
+                    <input
+                      type="range"
+                      min={cfg.minDollars}
+                      max={cfg.maxDollars}
+                      step={1}
+                      value={dollars}
+                      onChange={(e) => setOneTimeDollars(Number(e.target.value))}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        margin: 0,
+                        padding: 0,
+                        boxSizing: 'border-box',
+                        accentColor: '#F97316',
+                      }}
+                    />
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        color: '#9CA3AF',
+                        fontSize: 11,
+                        marginTop: 6,
+                      }}
+                    >
+                      <span>${cfg.minDollars}</span>
+                      <span>${cfg.maxDollars}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <label style={{ fontSize: 12, color: '#6B7280' }}>Amount</label>
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        border: '1px solid #E2E2E2',
+                        borderRadius: 8,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <span style={{ padding: '6px 8px', color: '#6B7280', fontSize: 13 }}>$</span>
+                      <input
+                        type="number"
+                        min={cfg.minDollars}
+                        max={cfg.maxDollars}
+                        step={1}
+                        value={oneTimeDollars}
+                        onChange={(e) => setOneTimeDollars(Number(e.target.value))}
+                        onBlur={() => setOneTimeDollars(dollars)}
+                        style={{
+                          border: 'none',
+                          outline: 'none',
+                          fontSize: 13,
+                          padding: '6px 8px',
+                          width: 64,
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openPaymentLink(cfg.paymentLinkUrl, { prefilled_quantity: quantity })
+                      }
+                      disabled={!cfg.paymentLinkUrl}
+                      style={{
+                        marginLeft: 'auto',
+                        border: 'none',
+                        background: cfg.paymentLinkUrl ? '#F97316' : '#E5E7EB',
+                        color: cfg.paymentLinkUrl ? '#fff' : '#9CA3AF',
+                        fontWeight: 600,
+                        fontSize: 13,
+                        padding: '8px 14px',
+                        borderRadius: 8,
+                        cursor: cfg.paymentLinkUrl ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      Buy ✻ {tokens.toLocaleString()}
+                    </button>
+                  </div>
+                  {!cfg.paymentLinkUrl ? (
+                    <div style={{ fontSize: 11, color: '#9CA3AF' }}>
+                      One-time purchases not configured yet.
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })()
+          )}
+
+
+          <div
             style={{
-              all: 'unset',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
-              cursor: 'pointer',
-              margin: '20px 20px 8px',
+              margin: '20px 20px 24px',
+              border: '1px solid #E5E7EB',
+              borderRadius: 10,
+              overflow: 'hidden',
+              background: '#fff',
             }}
           >
-            <span
+            <button
+              type="button"
+              onClick={() => setActivityOpen((v) => !v)}
               style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: '#6B7280',
-                textTransform: 'uppercase',
-                letterSpacing: 0.4,
+                all: 'unset',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                cursor: 'pointer',
+                padding: '12px 14px',
+                width: '100%',
+                boxSizing: 'border-box',
               }}
             >
-              Activity
-              {transactions.length > 0 ? (
-                <span style={{ marginLeft: 6, color: '#9CA3AF' }}>
-                  ({transactions.length})
+              <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: '#6B7280',
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  Activity
                 </span>
-              ) : null}
-            </span>
-            <span
-              aria-hidden
-              style={{
-                color: '#9CA3AF',
-                fontSize: 10,
-                transform: activityOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-                transition: 'transform 140ms ease',
-              }}
-            >
-              ▶
-            </span>
-          </button>
-          {activityOpen ? (
-            <div style={{ padding: '0 20px 20px' }}>
-              {error ? (
-                <div style={{ color: '#B91C1C', fontSize: 13 }}>{error}</div>
-              ) : null}
-              {loading && transactions.length === 0 ? (
-                <div style={{ color: '#6B7280', fontSize: 13 }}>Loading…</div>
-              ) : null}
-              {!loading && transactions.length === 0 && !error ? (
-                <div style={{ color: '#6B7280', fontSize: 13 }}>No activity yet.</div>
-              ) : null}
-              {transactions.map((t) => (
-                <ActivityRow key={t.id} tx={t} />
-              ))}
-            </div>
-          ) : null}
+                {transactions.length > 0 ? (
+                  <span style={{ fontSize: 12, color: '#9CA3AF' }}>
+                    ({transactions.length})
+                  </span>
+                ) : null}
+              </span>
+              <span
+                aria-hidden
+                style={{
+                  color: '#9CA3AF',
+                  fontSize: 10,
+                  transform: activityOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                  transition: 'transform 140ms ease',
+                }}
+              >
+                ▶
+              </span>
+            </button>
+            {activityOpen ? (
+              <div
+                style={{
+                  padding: '4px 14px 14px',
+                  borderTop: '1px solid #F3F4F6',
+                  maxHeight: 280,
+                  overflowY: 'auto',
+                }}
+              >
+                {error ? (
+                  <div style={{ color: '#B91C1C', fontSize: 13 }}>{error}</div>
+                ) : null}
+                {loading && transactions.length === 0 ? (
+                  <div style={{ color: '#6B7280', fontSize: 13 }}>Loading…</div>
+                ) : null}
+                {!loading && transactions.length === 0 && !error ? (
+                  <div style={{ color: '#6B7280', fontSize: 13 }}>No activity yet.</div>
+                ) : null}
+                {transactions.map((t) => (
+                  <ActivityRow key={t.id} tx={t} />
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>
