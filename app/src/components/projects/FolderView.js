@@ -46,7 +46,7 @@ const FolderView = ({
   };
 
   return (
-    <div style={{ position: 'relative', minHeight: '100vh' }}>
+    <div style={{ position: 'relative', minHeight: 'calc(100vh - var(--app-top-offset, 0px))' }}>
       <div style={{
         display: 'grid',
         gridTemplateColumns: `${HEADER_RAIL_WIDTH_PX}px 1fr ${HEADER_RAIL_WIDTH_PX}px`,

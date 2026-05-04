@@ -12,6 +12,8 @@ import App from "./App";
 import { AuthProvider } from "./context/AuthContext";
 import ProjectComponent from "./components/editor/ProjectComponent";
 import platform, { isElectron } from "./platform";
+import DownloadAppBanner from "./components/DownloadAppBanner";
+import LandingPage from "./components/LandingPage";
 
 class RootErrorBoundary extends React.Component {
   constructor(props) {
@@ -70,11 +72,39 @@ const Router = isElectron ? HashRouter : BrowserRouter;
 const Root = () => (
   <Router>
     <AuthProvider>
-      <Routes>
-        <Route path="/" element={<App />} />
-        <Route path="/project/:id" element={<ProjectRoute />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          minHeight: '100%',
+          flex: 1,
+        }}
+      >
+        <DownloadAppBanner />
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            width: '100%',
+          }}
+        >
+          <Routes>
+            {/* Web: `/` is a public landing page; the launcher lives at
+                `/home`. Electron has no marketing surface, so it lands
+                directly on the launcher. */}
+            <Route
+              path="/"
+              element={isElectron ? <App /> : <LandingPage />}
+            />
+            <Route path="/home" element={<App />} />
+            <Route path="/project/:id" element={<ProjectRoute />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
+      </div>
     </AuthProvider>
   </Router>
 );

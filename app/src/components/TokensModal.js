@@ -428,7 +428,7 @@ const TokensModal = ({ open, onClose }) => {
               Balance
             </div>
             <div style={{ fontSize: 24, fontWeight: 600, color: '#111' }}>
-              <span style={{ color: '#F97316', marginRight: 6 }}>✻</span>
+              <span style={{ color: '#4736C1', marginRight: 6 }}>✻</span>
               {(balance ?? 0).toLocaleString()}
             </div>
           </div>
@@ -526,7 +526,7 @@ const TokensModal = ({ open, onClose }) => {
                     }}
                   >
                     <div style={{ fontWeight: 600, color: '#111' }}>{pkg.label}</div>
-                    <div style={{ color: '#F97316', fontWeight: 600 }}>
+                    <div style={{ color: '#4736C1', fontWeight: 600 }}>
                       ✻ {pkg.tokens.toLocaleString()}
                     </div>
                     <div style={{ color: '#6B7280', fontSize: 12 }}>{pkg.priceLabel}</div>
@@ -551,7 +551,7 @@ const TokensModal = ({ open, onClose }) => {
                       style={{
                         marginTop: 10,
                         border: 'none',
-                        background: pkg.paymentLinkUrl ? '#F97316' : '#E5E7EB',
+                        background: pkg.paymentLinkUrl ? '#4736C1' : '#E5E7EB',
                         color: pkg.paymentLinkUrl ? '#fff' : '#9CA3AF',
                         fontWeight: 600,
                         fontSize: 12,
@@ -596,7 +596,7 @@ const TokensModal = ({ open, onClose }) => {
                 >
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
                     <div>
-                      <div style={{ color: '#F97316', fontWeight: 700, fontSize: 18 }}>
+                      <div style={{ color: '#4736C1', fontWeight: 700, fontSize: 18 }}>
                         ✻ {tokens.toLocaleString()}
                       </div>
                       <div style={{ color: '#6B7280', fontSize: 12, marginTop: 2 }}>
@@ -626,7 +626,7 @@ const TokensModal = ({ open, onClose }) => {
                         margin: 0,
                         padding: 0,
                         boxSizing: 'border-box',
-                        accentColor: '#F97316',
+                        accentColor: '#4736C1',
                       }}
                     />
                     <div
@@ -681,7 +681,7 @@ const TokensModal = ({ open, onClose }) => {
                       style={{
                         marginLeft: 'auto',
                         border: 'none',
-                        background: cfg.paymentLinkUrl ? '#F97316' : '#E5E7EB',
+                        background: cfg.paymentLinkUrl ? '#4736C1' : '#E5E7EB',
                         color: cfg.paymentLinkUrl ? '#fff' : '#9CA3AF',
                         fontWeight: 600,
                         fontSize: 13,

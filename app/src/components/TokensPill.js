@@ -26,6 +26,7 @@ const TokensPill = ({ tokens, onClick, size = 'md' }) => {
         fontSize: 12,
         fontWeight: 500,
         cursor: 'pointer',
+        fontFamily: 'inherit',
         WebkitAppRegion: 'no-drag',
         lineHeight: 1,
       }}
@@ -33,7 +34,7 @@ const TokensPill = ({ tokens, onClick, size = 'md' }) => {
       <span
         aria-hidden
         style={{
-          color: '#F97316',
+          color: '#4736C1',
           fontSize: 13,
           lineHeight: 1,
         }}

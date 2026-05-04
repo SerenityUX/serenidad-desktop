@@ -1,10 +1,29 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ProfileAvatarMenu from '../ProfileAvatarMenu';
 import TokensPill from '../TokensPill';
 import TokensModal from '../TokensModal';
 import VoiceIndicator from '../voice/VoiceIndicator';
 import { useAuth } from '../../context/AuthContext';
 import platform from '../../platform';
+import { asset } from '../../lib/asset';
+
+const BackButton = ({ onClick }) => (
+  <img
+    src={asset('icons/home.svg')}
+    onClick={onClick}
+    role="button"
+    aria-label="Back to home"
+    tabIndex={0}
+    style={{
+      width: 24,
+      height: 24,
+      display: 'block',
+      cursor: 'pointer',
+      WebkitAppRegion: 'no-drag',
+    }}
+  />
+);
 
 const TrafficLight = ({ color, onClick }) => (
   <div
@@ -77,6 +96,7 @@ const CenterSlot = ({ voice, projectName }) => {
 const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voice, projectName }) => {
   const { user } = useAuth();
   const [tokensOpen, setTokensOpen] = useState(false);
+  const navigate = useNavigate();
   return (
   <>
   <div style={{
@@ -87,6 +107,7 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voi
     height: 45,
     backgroundColor: '#fff',
     borderBottom: '1px solid #D9D9D9',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
     WebkitAppRegion: 'drag',
   }}>
     {platform.capabilities.hasNativeChrome ? (
@@ -96,9 +117,10 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voi
         <TrafficLight color="#28C840" onClick={() => platform.window.maximize()} />
       </div>
     ) : (
-      // Web has no traffic lights — fill the left slot with avatar + tokens
-      // (avatar first, then tokens). Desktop keeps them on the right.
+      // Web has no traffic lights — fill the left slot with a back button,
+      // then avatar + tokens. Desktop keeps tokens/avatar on the right.
       <div style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <BackButton onClick={() => navigate('/home')} />
         {user ? <ProfileAvatarMenu user={user} size={24} /> : null}
         {user ? (
           <TokensPill tokens={user.tokens ?? 0} onClick={() => setTokensOpen(true)} />
@@ -122,6 +144,8 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voi
             paddingTop: 4,
             paddingBottom: 4,
             cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 13,
             WebkitAppRegion: 'no-drag',
           }}
         >
@@ -140,6 +164,9 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voi
             borderRadius: 4,
             paddingTop: 4,
             paddingBottom: 4,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 13,
             WebkitAppRegion: 'no-drag',
           }}
         >

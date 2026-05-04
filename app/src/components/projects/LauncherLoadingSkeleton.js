@@ -11,7 +11,7 @@ const LauncherLoadingSkeleton = () => {
   const [tokensOpen, setTokensOpen] = useState(false);
 
   return (
-    <div style={{ minHeight: '100vh', background: '#FFFFFF' }}>
+    <div style={{ minHeight: 'calc(100vh - var(--app-top-offset, 0px))', background: '#FFFFFF' }}>
       <div
         style={{
           display: 'grid',

@@ -3,8 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
 const DEFAULT_SERENIDAD_API =
-  process.env.SERENIDAD_API_URL ||
-  'http://iokwcc8o0s4cw4s48ockoc8g.5.78.111.174.sslip.io';
+  process.env.SERENIDAD_API_URL || 'https://api.serenidad.click';
 
 /**
  * Two targets, one config:
