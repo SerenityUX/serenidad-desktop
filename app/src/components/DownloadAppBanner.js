@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { isElectron } from '../platform';
+import { asset } from '../lib/asset';
 
 const STORAGE_KEY = 'kodan_download_banner_dismissed';
 const ZIP_URL =
@@ -72,7 +73,7 @@ const DownloadAppBanner = () => {
     >
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
         <img
-          src={`${process.env.PUBLIC_URL || ''}/KodanFlower.png`}
+          src={asset('KodanFlower.png')}
           alt=""
           width={22}
           height={22}
