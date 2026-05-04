@@ -167,6 +167,17 @@ Models/LoRA/
 *.tsv
 *.txt
 
+# …but the project / build manifests must stay tracked. The blanket *.json
+# above is for dataset blobs, not config. Without these explicit unignores
+# Vercel can't see package.json after cloning and `npm install` blows up
+# with ENOENT.
+!package.json
+!package-lock.json
+!vercel.json
+!site.webmanifest
+!src/data/**/*.json
+!public/**/*.json
+
 # Logs and temporary files
 logs/
 tmp/

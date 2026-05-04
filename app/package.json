@@ -1,0 +1,86 @@
+{
+  "name": "serenidad-desktop",
+  "version": "1.0.1",
+  "private": true,
+  "description": "Kōdan — single React tree, two targets (Electron + web) built with Vite",
+  "main": "main/main.js",
+  "scripts": {
+    "dev:web": "vite",
+    "build:web": "vite build",
+    "preview:web": "vite preview",
+    "build:electron": "vite build --mode electron",
+    "watch:electron": "vite build --mode electron --watch",
+    "start": "electron .",
+    "start:electron": "npm run build:electron && electron .",
+    "build": "npm run build:electron",
+    "export": "npm run build:electron && electron-builder --mac --universal",
+    "update-desktop": "node scripts/updateDesktop.js"
+  },
+  "dependencies": {
+    "fontkit": "^2.0.4",
+    "fs-extra": "^11.2.0",
+    "glob": "^7.2.3",
+    "lodash": "^4.17.21",
+    "mp4-muxer": "^5.2.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-image": "^4.1.0",
+    "react-router-dom": "^7.14.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "vite": "^5.4.21"
+  },
+  "build": {
+    "appId": "app.serenidad.desktop",
+    "productName": "Serenidad",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main/**/*",
+      "dist/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "KodanFlower.icns",
+        "to": "KodanFlower.icns"
+      },
+      {
+        "from": "KodanFlower-dock.png",
+        "to": "KodanFlower-dock.png"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "icon": "KodanFlower.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "Serenidad ${version}",
+      "icon": "KodanFlower.icns"
+    }
+  }
+}

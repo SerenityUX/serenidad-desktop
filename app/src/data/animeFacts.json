@@ -1,0 +1,12 @@
+[
+  "Tip: write prompts as full sentences, not keyword lists.",
+  "Tip: describe mood, style, and context conversationally — no prompt syntax required.",
+  "Tip: spell out composition: camera placement, framing, and where things sit in the frame.",
+  "Tip: lighting cues like 'soft window light' or 'harsh midday sun' steer the look more than style tags.",
+  "Tip: drop in a reference image to lock characters or objects across scenes.",
+  "Tip: up to ~5 characters can stay consistent across generations — name them in the prompt.",
+  "Tip: if you want text in the image, write it in quotes exactly as it should appear.",
+  "Tip: describe motion and intent ('mid-stride, looking back over her shoulder') instead of static poses.",
+  "Tip: ground unfamiliar subjects with a short factual aside — it helps the model anchor the visual.",
+  "Tip: save often while iterating on a scene."
+]
