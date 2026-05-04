@@ -14,6 +14,7 @@ import ProjectComponent from "./components/editor/ProjectComponent";
 import platform, { isElectron } from "./platform";
 import DownloadAppBanner from "./components/DownloadAppBanner";
 import LandingPage from "./components/LandingPage";
+import UpdateGate from "./components/UpdateGate";
 
 class RootErrorBoundary extends React.Component {
   constructor(props) {
@@ -72,6 +73,7 @@ const Router = isElectron ? HashRouter : BrowserRouter;
 const Root = () => (
   <Router>
     <AuthProvider>
+      <UpdateGate>
       <div
         style={{
           display: 'flex',
@@ -105,6 +107,7 @@ const Root = () => (
           </Routes>
         </div>
       </div>
+      </UpdateGate>
     </AuthProvider>
   </Router>
 );

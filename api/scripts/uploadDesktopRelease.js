@@ -5,14 +5,15 @@ const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getS3Client } = require("../lib/s3");
 
 async function main() {
-  const zipPath = path.resolve(
-    __dirname,
-    "../../app/release/Serenidad-1.0.0-universal-mac.zip",
+  const appPkg = require("../../app/package.json");
+  const version = appPkg.version;
+  const releaseDir = path.resolve(__dirname, "../../app/release");
+
+  const zipPath = path.join(
+    releaseDir,
+    `Serenidad-${version}-universal-mac.zip`,
   );
-  const dmgPath = path.resolve(
-    __dirname,
-    "../../app/release/Serenidad-1.0.0-universal.dmg",
-  );
+  const dmgPath = path.join(releaseDir, `Serenidad-${version}-universal.dmg`);
 
   const bucket = process.env.S3_BUCKET;
   const endpoint = process.env.S3_ENDPOINT.replace(/\/$/, "");
@@ -24,6 +25,9 @@ async function main() {
   ];
 
   for (const { file, key, type } of uploads) {
+    if (!fs.existsSync(file)) {
+      throw new Error(`Missing artifact: ${file}\nDid you run \`npm run export\` in app/?`);
+    }
     const stat = fs.statSync(file);
     process.stdout.write(`Uploading ${path.basename(file)} (${(stat.size / 1024 / 1024).toFixed(1)} MB)... `);
     await client.send(

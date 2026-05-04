@@ -1,11 +1,13 @@
+# Electron-only assets — never deployed to web.
 main/
-dist/
 release/
-build/
-node_modules/
-*.icns
-*.png
-*.plist
-KodanFlower*
-entitlements*
+build/entitlements.mac.plist
+entitlements.plist
 Info.plist
+KodanFlower.icns
+KodanFlower-dock.png
+KodanFlower.png
+
+# Build outputs and deps Vercel rebuilds anyway.
+dist/
+node_modules/

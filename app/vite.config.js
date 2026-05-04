@@ -1,6 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const DESKTOP_VERSION = require('./package.json').version;
 
 const DEFAULT_SERENIDAD_API =
   process.env.SERENIDAD_API_URL || 'https://api.serenidad.click';
@@ -38,6 +42,7 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       'process.env.SERENIDAD_API_URL': JSON.stringify(DEFAULT_SERENIDAD_API),
+      'process.env.DESKTOP_VERSION': JSON.stringify(DESKTOP_VERSION),
     },
     build: {
       outDir: 'dist',

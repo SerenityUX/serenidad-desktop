@@ -79,6 +79,63 @@ async function getProjectIfAccessible(pool, projectId, userId) {
 
 module.exports = function createProjectsRouter(pool, requireAuth) {
   const router = express.Router();
+
+  /**
+   * Public preview for link-share cards. NO auth — anyone with a project
+   * id (or who scrapes one off your URL) can read these few fields. Only
+   * fields safe for public preview are exposed: project name + a thumbnail
+   * URL. Owner identity, prompts, scenes, and references stay private.
+   *
+   * Used by the Vercel edge function at /api/project-html to inject OG
+   * tags into the SPA shell when iMessage / Twitter / Slack crawl a
+   * `/project/:id` link.
+   */
+  router.get("/:id/public-preview", async (req, res) => {
+    const { id } = req.params;
+    if (!isUuid(id)) {
+      return res.status(400).json({ error: "Invalid project id" });
+    }
+    try {
+      const projRow = await pool.query(
+        `SELECT id, name, thumbnail, frame_ids FROM projects WHERE id = $1 LIMIT 1`,
+        [id],
+      );
+      const proj = projRow.rows[0];
+      if (!proj) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      // Prefer the explicit project thumbnail; fall back to the first frame
+      // that actually has a rendered result so shared links show *something*
+      // visual even before the owner sets a cover.
+      let thumbnailUrl = proj.thumbnail || null;
+      if (!thumbnailUrl && Array.isArray(proj.frame_ids) && proj.frame_ids.length > 0) {
+        const firstFrame = await pool.query(
+          `SELECT result
+             FROM frames
+            WHERE project_id = $1 AND result IS NOT NULL AND result <> ''
+         ORDER BY COALESCE(array_position($2::uuid[], id), 2147483647), created_at
+            LIMIT 1`,
+          [id, proj.frame_ids],
+        );
+        thumbnailUrl = firstFrame.rows[0]?.result || null;
+      }
+
+      // Cache at the edge so a popular share URL doesn't hammer the DB.
+      res.set(
+        "Cache-Control",
+        "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+      );
+      return res.json({
+        name: proj.name,
+        thumbnailUrl: thumbnailUrl || null,
+      });
+    } catch (e) {
+      console.error("public-preview failed:", e);
+      return res.status(500).json({ error: "Could not load preview" });
+    }
+  });
+
   router.use(requireAuth);
 
   router.get("/models", (_req, res) => {

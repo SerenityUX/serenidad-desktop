@@ -7,6 +7,7 @@ const createAuthRouter = require("./routes/auth");
 const createRequireAuth = require("./middleware/requireAuth");
 const createProjectsRouter = require("./routes/projects");
 const createVoiceRouter = require("./routes/voice");
+const desktopVersion = require("./desktopVersion");
 
 const port = Number(process.env.PORT) || 3000;
 
@@ -29,6 +30,10 @@ async function main() {
 
   app.get("/", (_req, res) => {
     res.type("text/plain").send(dbOk ? "db connected" : "db failed");
+  });
+
+  app.get("/desktop-version", (_req, res) => {
+    res.json(desktopVersion);
   });
 
   if (dbOk) {
