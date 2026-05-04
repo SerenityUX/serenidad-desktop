@@ -33,12 +33,12 @@ const TokensPill = ({ tokens, onClick, size = 'md' }) => {
       <span
         aria-hidden
         style={{
-          color: '#1F93FF',
+          color: '#F97316',
           fontSize: 13,
           lineHeight: 1,
         }}
       >
-        ✦
+        ✻
       </span>
       <span>{formatTokens(tokens)}</span>
     </button>

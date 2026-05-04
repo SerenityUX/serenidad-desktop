@@ -1,6 +1,7 @@
 import React from 'react';
 import SectionHeader from '../shared/SectionHeader';
 import FieldLabel from '../shared/FieldLabel';
+import { asset } from '../../../lib/asset';
 
 const selectStyle = {
   width: 'calc(100% - 24px)',
@@ -34,7 +35,7 @@ const StyleSection = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <SectionHeader icon="icons/Picture.svg" label="Style" />
+      <SectionHeader icon={asset('icons/Picture.svg')} label="Style" />
 
       {showFal && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>

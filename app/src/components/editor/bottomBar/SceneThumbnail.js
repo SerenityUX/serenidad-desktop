@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { Img } from 'react-image';
+import { asset } from '../../../lib/asset';
 
 // iOS dark-mode system blue / accent pink for video frames.
 const IOS_BLUE = '#0A84FF';
@@ -116,7 +117,7 @@ const SceneThumbnail = ({
           }}
         >
           <Img
-            src="./icons/Minus.svg"
+            src={asset('icons/Minus.svg')}
             style={{ width: 18, height: 18, pointerEvents: 'none' }}
           />
         </button>

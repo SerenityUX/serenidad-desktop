@@ -1,6 +1,7 @@
 import React from 'react';
 import SectionHeader from '../shared/SectionHeader';
 import FieldLabel from '../shared/FieldLabel';
+import { asset } from '../../../lib/asset';
 
 const textareaStyle = (isTransitioning) => ({
   width: 'calc(100% - 32px)',
@@ -21,7 +22,7 @@ const textareaStyle = (isTransitioning) => ({
 
 const PromptSection = ({ prompt, onPromptChange, isTransitioning, promptLabel }) => (
   <>
-    <SectionHeader icon="icons/Prompt.svg" label={promptLabel === 'VIDEO PROMPT' ? 'Video Prompt' : 'Prompt'} />
+    <SectionHeader icon={asset('icons/Prompt.svg')} label={promptLabel === 'VIDEO PROMPT' ? 'Video Prompt' : 'Prompt'} />
 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
       <FieldLabel>{promptLabel || 'PROMPT'}</FieldLabel>

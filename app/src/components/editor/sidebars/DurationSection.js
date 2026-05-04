@@ -2,12 +2,13 @@ import React from 'react';
 import SectionHeader from '../shared/SectionHeader';
 import Divider from '../shared/Divider';
 import FieldLabel from '../shared/FieldLabel';
+import { asset } from '../../../lib/asset';
 
 const DurationSection = ({ videoMode, sceneDuration, onSceneDurationChange }) => (
   <>
     <Divider />
     <SectionHeader
-      icon="icons/clipDuration.svg"
+      icon={asset('icons/clipDuration.svg')}
       label={videoMode ? 'Video Duration' : 'Frame Duration'}
     />
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>

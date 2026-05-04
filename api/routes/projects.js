@@ -476,13 +476,14 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
         });
       }
       await debitClient.query(
-        `INSERT INTO transactions (user_id, delta, name, notes)
-         VALUES ($1, $2, $3, $4)`,
+        `INSERT INTO transactions (user_id, delta, name, notes, frame_id)
+         VALUES ($1, $2, $3, $4, $5)`,
         [
           req.user.id,
           -tokenCost,
           "Image generation",
           `${model.id} frame ${frameId}`,
+          frameId,
         ],
       );
       await debitClient.query("COMMIT");
@@ -497,9 +498,9 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     const refundTokens = async (notes) => {
       try {
         await pool.query(
-          `INSERT INTO transactions (user_id, delta, name, notes)
-           VALUES ($1, $2, $3, $4)`,
-          [req.user.id, tokenCost, "Refund", String(notes || "").slice(0, 500)],
+          `INSERT INTO transactions (user_id, delta, name, notes, frame_id)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [req.user.id, tokenCost, "Refund", String(notes || "").slice(0, 500), frameId],
         );
       } catch (refundErr) {
         console.error(refundErr);
@@ -633,9 +634,9 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
           .json({ error: "Insufficient tokens", tokens: current, required: tokenCost });
       }
       await debitClient.query(
-        `INSERT INTO transactions (user_id, delta, name, notes)
-         VALUES ($1, $2, $3, $4)`,
-        [req.user.id, -tokenCost, "Video generation", `${model.id} frame ${frameId}`],
+        `INSERT INTO transactions (user_id, delta, name, notes, frame_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [req.user.id, -tokenCost, "Video generation", `${model.id} frame ${frameId}`, frameId],
       );
       await debitClient.query("COMMIT");
     } catch (e) {
@@ -649,9 +650,9 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     const refundTokens = async (notes) => {
       try {
         await pool.query(
-          `INSERT INTO transactions (user_id, delta, name, notes)
-           VALUES ($1, $2, $3, $4)`,
-          [req.user.id, tokenCost, "Refund", String(notes || "").slice(0, 500)],
+          `INSERT INTO transactions (user_id, delta, name, notes, frame_id)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [req.user.id, tokenCost, "Refund", String(notes || "").slice(0, 500), frameId],
         );
       } catch (refundErr) {
         console.error(refundErr);

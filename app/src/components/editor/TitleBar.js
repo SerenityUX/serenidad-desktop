@@ -96,7 +96,14 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voi
         <TrafficLight color="#28C840" onClick={() => platform.window.maximize()} />
       </div>
     ) : (
-      <div style={{ marginLeft: 12 }} />
+      // Web has no traffic lights — fill the left slot with avatar + tokens
+      // (avatar first, then tokens). Desktop keeps them on the right.
+      <div style={{ marginLeft: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {user ? <ProfileAvatarMenu user={user} size={24} /> : null}
+        {user ? (
+          <TokensPill tokens={user.tokens ?? 0} onClick={() => setTokensOpen(true)} />
+        ) : null}
+      </div>
     )}
 
     <CenterSlot voice={voice} projectName={projectName} />
@@ -139,10 +146,14 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voi
           Export
         </button>
       )}
-      {user ? (
+      {/* Tokens + avatar live on the right in Electron; web moves them to
+          the left slot above. */}
+      {platform.capabilities.hasNativeChrome && user ? (
         <TokensPill tokens={user.tokens ?? 0} onClick={() => setTokensOpen(true)} />
       ) : null}
-      {user ? <ProfileAvatarMenu user={user} size={24} align="right" /> : null}
+      {platform.capabilities.hasNativeChrome && user ? (
+        <ProfileAvatarMenu user={user} size={24} align="right" />
+      ) : null}
     </div>
   </div>
   <TokensModal open={tokensOpen} onClose={() => setTokensOpen(false)} />

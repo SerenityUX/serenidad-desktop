@@ -230,10 +230,16 @@ module.exports = function createAuthRouter(pool, requireAuth) {
   router.get("/transactions", requireAuth, async (req, res) => {
     try {
       const r = await pool.query(
-        `SELECT id, delta, name, notes, created_at
-         FROM transactions
-         WHERE user_id = $1
-         ORDER BY created_at DESC
+        `SELECT
+           t.id, t.delta, t.name, t.notes, t.created_at, t.frame_id,
+           f.prompt AS frame_prompt,
+           f.result AS frame_result,
+           f.model  AS frame_model,
+           f.reference_urls AS frame_reference_urls
+         FROM transactions t
+         LEFT JOIN frames f ON f.id = t.frame_id
+         WHERE t.user_id = $1
+         ORDER BY t.created_at DESC
          LIMIT 200`,
         [req.user.id],
       );
@@ -241,9 +247,27 @@ module.exports = function createAuthRouter(pool, requireAuth) {
         `SELECT tokens FROM users WHERE id = $1`,
         [req.user.id],
       );
+      const transactions = r.rows.map((row) => ({
+        id: row.id,
+        delta: row.delta,
+        name: row.name,
+        notes: row.notes,
+        created_at: row.created_at,
+        frame: row.frame_id
+          ? {
+              id: row.frame_id,
+              prompt: row.frame_prompt || "",
+              result: row.frame_result || null,
+              model: row.frame_model || null,
+              reference_urls: Array.isArray(row.frame_reference_urls)
+                ? row.frame_reference_urls
+                : [],
+            }
+          : null,
+      }));
       res.json({
         tokens: balRow.rows[0]?.tokens ?? 0,
-        transactions: r.rows,
+        transactions,
       });
     } catch (e) {
       console.error(e);
@@ -251,31 +275,63 @@ module.exports = function createAuthRouter(pool, requireAuth) {
     }
   });
 
+  // 1 token ≈ 1¢ of model spend.
+  // Subscription = 20% margin → 80 tokens per $1.
+  // One-time     = 30% margin → 70 tokens per $1.
   router.get("/token-packages", requireAuth, (req, res) => {
-    const all = [
+    const subscription = [
       {
-        id: "starter",
+        id: "sub_starter",
+        kind: "subscription",
         label: "Starter",
-        tokens: 1000,
-        priceLabel: "$5",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_STARTER || "",
+        tokens: 800,
+        priceLabel: "$10/mo",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_STARTER || "",
       },
       {
-        id: "creator",
+        id: "sub_creator",
+        kind: "subscription",
         label: "Creator",
-        tokens: 5000,
-        priceLabel: "$20",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_CREATOR || "",
+        tokens: 2400,
+        priceLabel: "$30/mo",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_CREATOR || "",
       },
       {
-        id: "studio",
+        id: "sub_studio",
+        kind: "subscription",
         label: "Studio",
-        tokens: 20000,
-        priceLabel: "$70",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_STUDIO || "",
+        tokens: 12000,
+        priceLabel: "$150/mo",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_STUDIO || "",
       },
     ];
-    res.json({ packages: all.filter((p) => p.paymentLinkUrl) });
+    const oneTime = [
+      {
+        id: "buy_starter",
+        kind: "one_time",
+        label: "Starter",
+        tokens: 700,
+        priceLabel: "$10",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_BUY_STARTER || "",
+      },
+      {
+        id: "buy_creator",
+        kind: "one_time",
+        label: "Creator",
+        tokens: 2100,
+        priceLabel: "$30",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_BUY_CREATOR || "",
+      },
+      {
+        id: "buy_studio",
+        kind: "one_time",
+        label: "Studio",
+        tokens: 10500,
+        priceLabel: "$150",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_BUY_STUDIO || "",
+      },
+    ];
+    res.json({ packages: [...subscription, ...oneTime] });
   });
 
   router.post(

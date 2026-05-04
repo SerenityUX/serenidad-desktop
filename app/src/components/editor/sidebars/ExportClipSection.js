@@ -1,11 +1,12 @@
 import React from 'react';
 import SectionHeader from '../shared/SectionHeader';
 import Divider from '../shared/Divider';
+import { asset } from '../../../lib/asset';
 
 const ExportClipSection = ({ canExport, onExport }) => (
   <>
     <Divider />
-    <SectionHeader icon="icons/export.svg" label="Export Clip" />
+    <SectionHeader icon={asset('icons/export.svg')} label="Export Clip" />
     <button
       onClick={onExport}
       disabled={!canExport}

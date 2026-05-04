@@ -24,12 +24,16 @@ const EditorLayout = ({
     fontFamily: 'Arial, sans-serif',
     margin: 0,
     padding: 0,
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    minHeight: 0,
+    overflow: 'hidden',
   }}>
     <TitleBar onExport={onExport} onShare={onShare} showShare={showShare} voice={voice} projectName={projectName} />
 
-    <div style={{ display: 'flex', width: '100%', height: 'calc(100% - 175px)' }}>
+    {/* Middle row fills whatever's left between the (fixed) title bar and
+        scenes strip. The previous `calc(100% - 175px)` only subtracted the
+        strip and overflowed by the title bar's height — fine in a frameless
+        full-screen Electron window, broken in a smaller browser viewport. */}
+    <div style={{ display: 'flex', width: '100%', flex: 1, minHeight: 0 }}>
       <LeftSidebar {...leftSidebarProps} />
       <CenterStage {...centerStageProps} />
       <RightSidebar {...rightSidebarProps} />

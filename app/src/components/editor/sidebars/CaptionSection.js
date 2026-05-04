@@ -1,6 +1,7 @@
 import React from 'react';
 import SectionHeader from '../shared/SectionHeader';
 import ColorPickerField from './ColorPickerField';
+import { asset } from '../../../lib/asset';
 
 const rowStyle = { display: 'flex', flexDirection: 'row', gap: 8, marginLeft: 12, marginRight: 12 };
 
@@ -34,7 +35,7 @@ const CaptionSection = ({
   onCaptionBlur,
 }) => (
   <>
-    <SectionHeader icon="icons/caption.svg" label="Caption" />
+    <SectionHeader icon={asset('icons/caption.svg')} label="Caption" />
 
     <div style={rowStyle}>
       <select

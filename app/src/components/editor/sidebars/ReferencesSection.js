@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import SectionHeader from '../shared/SectionHeader';
 import FieldLabel from '../shared/FieldLabel';
+import { asset } from '../../../lib/asset';
 
 const THUMB = 48;
 const MIN_HEIGHT = 64;
@@ -116,7 +117,7 @@ const ReferencesSection = ({
 
   return (
     <>
-      <SectionHeader icon="icons/Picture.svg" label="References" />
+      <SectionHeader icon={asset('icons/Picture.svg')} label="References" />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
         <FieldLabel>{acceptVideos ? 'REFERENCE FRAMES' : 'REFERENCE IMAGES'}</FieldLabel>

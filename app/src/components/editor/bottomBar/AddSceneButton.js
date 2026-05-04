@@ -1,5 +1,6 @@
 import React from 'react';
 import { Img } from 'react-image';
+import { asset } from '../../../lib/asset';
 
 const AddSceneButton = ({ aspectRatio, isPressed, onMouseDown, onMouseUp, onMouseLeave }) => (
   <div
@@ -35,7 +36,7 @@ const AddSceneButton = ({ aspectRatio, isPressed, onMouseDown, onMouseUp, onMous
         transition: 'opacity 0.1s ease-out, transform 0.1s ease-out',
       }}
     >
-      <Img src="./icons/Plus.svg" style={{ width: '32px', height: '32px' }} alt="Add Item" />
+      <Img src={asset('icons/Plus.svg')} style={{ width: '32px', height: '32px' }} alt="Add Item" />
     </div>
   </div>
 );

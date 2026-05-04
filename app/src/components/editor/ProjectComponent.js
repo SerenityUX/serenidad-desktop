@@ -306,6 +306,13 @@ const ProjectComponent = ({ projectId }) => {
     }
   }, []);
 
+  // `handleAddReferenceFiles` / `handleAddReferenceUrl` are defined further
+  // below. We hold them in refs so this callback can stay near its use sites
+  // (clipboard hotkey effect) without hitting a TDZ on the dep array — the
+  // raw function names aren't initialized until later in the render.
+  const addReferenceFilesRef = useRef(null);
+  const addReferenceUrlRef = useRef(null);
+
   const pasteFromClipboardToReferences = useCallback(async () => {
     try {
       if (navigator.clipboard?.read) {
@@ -316,7 +323,7 @@ const ProjectComponent = ({ projectId }) => {
             const blob = await item.getType(imageType);
             const ext = imageType.split('/')[1] || 'png';
             const file = new File([blob], `pasted-${Date.now()}.${ext}`, { type: imageType });
-            await handleAddReferenceFiles([file]);
+            await addReferenceFilesRef.current?.([file]);
             return;
           }
         }
@@ -327,12 +334,12 @@ const ProjectComponent = ({ projectId }) => {
     try {
       const text = (await navigator.clipboard.readText())?.trim();
       if (text && /^https?:\/\//i.test(text)) {
-        await handleAddReferenceUrl(text);
+        await addReferenceUrlRef.current?.(text);
       }
     } catch (e) {
       console.warn('clipboard readText failed', e);
     }
-  }, [handleAddReferenceFiles, handleAddReferenceUrl]);
+  }, []);
 
   const reorderFrames = useCallback(
     async (newOrderIds) => {
@@ -1220,6 +1227,10 @@ const ProjectComponent = ({ projectId }) => {
     },
     [projectData, selectedScene, authToken, projectId, updateSceneReferences],
   );
+
+  // Keep the refs read by the (earlier) clipboard paste handler in sync.
+  addReferenceFilesRef.current = handleAddReferenceFiles;
+  addReferenceUrlRef.current = handleAddReferenceUrl;
 
   const handleRemoveReference = useCallback(
     async (url) => {
