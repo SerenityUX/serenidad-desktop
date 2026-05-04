@@ -12,6 +12,9 @@ import { composeSceneToPng } from '../../lib/composeScene';
 import { encodeSegmentsToMp4 } from '../../lib/exportProject';
 import useVoicePrompt from '../../hooks/useVoicePrompt';
 import platform from '../../platform';
+import useDocumentMeta from '../../hooks/useDocumentMeta';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 
 const DEFAULT_IMAGE_DURATION = 2;
 const DEFAULT_VIDEO_DURATION = 4;
@@ -74,12 +77,96 @@ const weightToLabel = (weight) => {
   return map[weight] || weight.toString();
 };
 
+/**
+ * Clear, friendly screen for the failure modes around opening a project URL:
+ * not signed in, signed in but not allowed, project doesn't exist, or some
+ * generic network failure. Replaces the previous behavior of an endless
+ * loading skeleton when the API rejected the request.
+ */
+const ProjectAccessError = ({ error }) => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const kind = error?.kind || 'error';
+
+  let heading = 'Something went wrong.';
+  let body = error?.message || 'Could not load this project.';
+
+  if (kind === 'unauthenticated') {
+    heading = 'Sign in to view this project.';
+    body = 'This project is private. Sign in with the account that has access.';
+  } else if (kind === 'forbidden') {
+    heading = 'You don’t have access to this project.';
+    body = user
+      ? 'This project belongs to someone else, or has been removed from your access.'
+      : 'Sign in with the account that owns this project, then try again.';
+  } else if (kind === 'notfound') {
+    heading = 'Project not found.';
+    body = 'This project doesn’t exist, or its URL has changed.';
+  }
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        fontFamily:
+          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        textAlign: 'center',
+      }}
+    >
+      <div style={{ maxWidth: 420 }}>
+        <h1 style={{ fontSize: 22, margin: '0 0 8px', color: '#111' }}>{heading}</h1>
+        <p style={{ fontSize: 14, color: '#6B7280', margin: '0 0 20px', lineHeight: 1.5 }}>
+          {body}
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate('/home')}
+          style={{
+            backgroundColor: '#1F93FF',
+            color: '#fff',
+            border: 0,
+            borderRadius: 6,
+            padding: '8px 16px',
+            fontSize: 14,
+            cursor: 'pointer',
+          }}
+        >
+          Go to your projects
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const ProjectComponent = ({ projectId }) => {
   // Cloud-only mode. The launcher bails before mount if no projectId.
   const isRemote = true;
 
   // Project data + selection
   const [projectData, setProjectData] = useState(null);
+  /**
+   * `null` while we haven't tried/are trying to load. Set to a structured
+   * value when a load attempt definitively fails so the UI can show a
+   * clear "no access" / "not found" screen instead of an endless skeleton.
+   */
+  const [loadError, setLoadError] = useState(null);
+
+  // Per-project tab title + OG meta. Only updates the live DOM, so link
+  // previews need server-rendered HTML on `/project/:id` to actually show
+  // (see deployment notes).
+  useDocumentMeta(
+    projectData?.name
+      ? {
+          title: `${projectData.name} — Kōdan`,
+          description: `Storyboard for "${projectData.name}" on Kōdan Anime Studio.`,
+          image: projectData?.scenes?.[0]?.thumbnail || undefined,
+        }
+      : undefined,
+  );
   const [thumbnail, setThumbnail] = useState('');
   const [aspectRatio, setAspectRatio] = useState(1);
   /* Stable, project-wide aspect — never overwritten by individual image loads, so
@@ -247,6 +334,19 @@ const ProjectComponent = ({ projectId }) => {
     };
   }, []);
 
+  // Auth has resolved but there's no token → the visitor isn't signed in.
+  // This catches drive-by `/project/:id` URL pastes where the user has no
+  // session, before we even attempt the API call.
+  useEffect(() => {
+    if (authResolved && !authToken && isRemote && projectId) {
+      setLoadError({
+        kind: 'unauthenticated',
+        status: 401,
+        message: 'Sign in to view this project.',
+      });
+    }
+  }, [authResolved, authToken, isRemote, projectId]);
+
   useEffect(() => {
     if (!isRemote || !projectId || !authToken) return undefined;
     let cancelled = false;
@@ -259,10 +359,22 @@ const ProjectComponent = ({ projectId }) => {
           },
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok || cancelled) {
-          console.error(data.error || res.status);
+        if (cancelled) return;
+        if (!res.ok) {
+          // Surface a clear message rather than spinning forever.
+          // 401/403 → no access (signed-in user can't see this project, or
+          //           token is rejected). 404 → project doesn't exist.
+          let kind = 'error';
+          if (res.status === 401 || res.status === 403) kind = 'forbidden';
+          else if (res.status === 404) kind = 'notfound';
+          setLoadError({
+            kind,
+            status: res.status,
+            message: data.error || res.statusText || 'Could not load project.',
+          });
           return;
         }
+        setLoadError(null);
         const pd = remoteDetailToProjectData(data.project, data.frames || []);
         setProjectData(pd);
         const pw = data.project.width || 1280;
@@ -1704,6 +1816,9 @@ const ProjectComponent = ({ projectId }) => {
   // ---------- Render ----------
   if (!authResolved) {
     return <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>Loading…</div>;
+  }
+  if (loadError) {
+    return <ProjectAccessError error={loadError} />;
   }
   if (!authToken) {
     return (
