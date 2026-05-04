@@ -6,7 +6,6 @@ const fontkit = require('fontkit');
 const glob = require('glob');
 
 let mainWindow;
-let modalWindow;
 let viewerAuthToken = null;
 
 function getResourcePath(filename) {
@@ -61,64 +60,6 @@ function createMainWindow() {
   }
 }
 
-function createModalWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    console.error('createModalWindow: main window is missing');
-    return;
-  }
-
-  if (modalWindow && !modalWindow.isDestroyed()) {
-    modalWindow.focus();
-    modalWindow.show();
-    return;
-  }
-
-  modalWindow = new BrowserWindow({
-    parent: mainWindow,
-    icon: getAppIconPath(),
-    modal: false,
-    show: false,
-    width: 300,
-    height: 200,
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    closable: true,
-    title: 'New Project',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-  });
-
-  let shown = false;
-  const showModal = () => {
-    if (shown || !modalWindow || modalWindow.isDestroyed()) return;
-    shown = true;
-    mainWindow.setClosable(false);
-    mainWindow.setMinimizable(false);
-    modalWindow.show();
-  };
-
-  modalWindow.once('ready-to-show', showModal);
-  modalWindow.webContents.once('did-finish-load', showModal);
-
-  modalWindow.loadFile(path.join(__dirname, '../public/modal.html')).catch((err) => {
-    console.error('modal loadFile:', err);
-  });
-
-  modalWindow.on('closed', () => {
-    modalWindow = null;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setClosable(true);
-      mainWindow.setMinimizable(true);
-      mainWindow.webContents.send('close-modal');
-    }
-  });
-}
-
 function createProjectWindow(projectId) {
   if (!projectId || typeof projectId !== 'string') {
     console.error('createProjectWindow: missing projectId');
@@ -142,10 +83,12 @@ function createProjectWindow(projectId) {
     },
   });
 
-  const viewerHtmlPath = path.join(__dirname, '../dist/project-viewer.html');
-  const viewerUrl = new URL(pathToFileURL(viewerHtmlPath).href);
-  viewerUrl.searchParams.set('projectId', projectId);
-  projectWindow.loadURL(viewerUrl.href);
+  // Single SPA: load index.html and route to the editor via hash. Used to
+  // be a separate project-viewer.html bundle; the router handles it now.
+  const indexHtmlPath = path.join(__dirname, '../dist/index.html');
+  const indexUrl = new URL(pathToFileURL(indexHtmlPath).href);
+  indexUrl.hash = `/project/${encodeURIComponent(projectId)}`;
+  projectWindow.loadURL(indexUrl.href);
 
   projectWindow.on('closed', () => {
     viewerAuthToken = null;
@@ -196,34 +139,6 @@ ipcMain.on('close-main-window', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setClosable(true);
     mainWindow.close();
-  }
-});
-
-// ---------- Modal flow ----------
-ipcMain.on('open-modal', () => {
-  createModalWindow();
-});
-
-ipcMain.on('close-modal', () => {
-  if (modalWindow) modalWindow.close();
-});
-
-ipcMain.on('create-project-from-modal', (_event, details) => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('create-project-submit', details);
-  } else if (modalWindow && !modalWindow.isDestroyed()) {
-    modalWindow.webContents.send(
-      'create-project-result',
-      { ok: false, error: 'Main window is not available.' },
-    );
-  }
-});
-
-// Renderer (App.js) reports back here after the POST /projects round-trip;
-// we forward the result to the modal so it can show an inline error or close.
-ipcMain.on('create-project-result', (_event, result) => {
-  if (modalWindow && !modalWindow.isDestroyed()) {
-    modalWindow.webContents.send('create-project-result', result || {});
   }
 });
 

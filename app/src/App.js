@@ -1,13 +1,20 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { AuthProvider, useAuth } from "./context/AuthContext";
+import { useAuth } from "./context/AuthContext";
 import AuthScreen from "./components/auth/AuthScreen";
 import FolderView from "./components/projects/FolderView";
 import LauncherLoadingSkeleton from "./components/projects/LauncherLoadingSkeleton";
 import { apiUrl } from "./config";
+import platform from "./platform";
 
 const MainApp = () => {
   const { token } = useAuth();
   const [projects, setProjects] = useState([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  /**
+   * Three states: undefined = no result yet, null = success (modal can close
+   * itself / parent will close it), string = error to surface inline.
+   */
+  const [createResult, setCreateResult] = useState(undefined);
 
   const refreshProjects = useCallback(async () => {
     if (!token) return;
@@ -39,64 +46,44 @@ const MainApp = () => {
     refreshProjects();
   }, [refreshProjects]);
 
-  useEffect(() => {
-    // Register unconditionally so the listener exists even before auth has
-    // hydrated. We check token inside the handler and report a clear error
-    // back to the modal instead of silently dropping the click.
-    const unsub = window.electron.ipcRenderer.on(
-      "create-project-submit",
-      /** Preload forwards only payload args (not the IPC event). */
-      async (payload) => {
-        const reportResult = (result) => {
-          window.electron.ipcRenderer.send("create-project-result", result);
-        };
-
-        try {
-          if (!token) {
-            throw new Error(
-              "Not signed in yet — wait for sign-in to finish, then try again.",
-            );
-          }
-          const { projectName, width, height } = payload || {};
-          const trimmedName = String(projectName || "").trim();
-          if (!trimmedName) throw new Error("Project name is required.");
-          const w =
-            Number.parseInt(String(width).replace(/\D/g, ""), 10) || 1280;
-          const h =
-            Number.parseInt(String(height).replace(/\D/g, ""), 10) || 720;
-
-          const res = await fetch(apiUrl("/projects"), {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ name: trimmedName, width: w, height: h }),
-          });
-          const body = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            throw new Error(
-              body.error || `Could not create project (HTTP ${res.status})`,
-            );
-          }
-          reportResult({ ok: true });
-          window.electron.ipcRenderer.send("close-modal");
-          await refreshProjects();
-          await window.electron.openProjectWindow({
-            projectId: body.id,
-            token,
-          });
-        } catch (err) {
-          console.error(err);
-          reportResult({
-            ok: false,
-            error: String(err?.message || "Create failed"),
-          });
+  const handleCreateSubmit = useCallback(
+    async ({ projectName, width, height }) => {
+      try {
+        if (!token) {
+          throw new Error(
+            "Not signed in yet — wait for sign-in to finish, then try again.",
+          );
         }
-      },
-    );
-    return () => unsub();
-  }, [token, refreshProjects]);
+        const trimmedName = String(projectName || "").trim();
+        if (!trimmedName) throw new Error("Project name is required.");
+        const w = Number.parseInt(String(width).replace(/\D/g, ""), 10) || 1280;
+        const h = Number.parseInt(String(height).replace(/\D/g, ""), 10) || 720;
+
+        const res = await fetch(apiUrl("/projects"), {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ name: trimmedName, width: w, height: h }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(
+            body.error || `Could not create project (HTTP ${res.status})`,
+          );
+        }
+        setCreateResult(null);
+        setCreateOpen(false);
+        await refreshProjects();
+        await platform.openProject({ projectId: body.id, token });
+      } catch (err) {
+        console.error(err);
+        setCreateResult(String(err?.message || "Create failed"));
+      }
+    },
+    [token, refreshProjects],
+  );
 
   return (
     <div
@@ -105,7 +92,17 @@ const MainApp = () => {
           '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
       }}
     >
-      <FolderView projects={projects} />
+      <FolderView
+        projects={projects}
+        createOpen={createOpen}
+        onOpenCreate={() => {
+          setCreateResult(undefined);
+          setCreateOpen(true);
+        }}
+        onCloseCreate={() => setCreateOpen(false)}
+        onCreateSubmit={handleCreateSubmit}
+        createResult={createResult}
+      />
     </div>
   );
 };
@@ -124,10 +121,6 @@ const AppGate = () => {
   return <MainApp />;
 };
 
-const App = () => (
-  <AuthProvider>
-    <AppGate />
-  </AuthProvider>
-);
+const App = () => <AppGate />;
 
 export default App;

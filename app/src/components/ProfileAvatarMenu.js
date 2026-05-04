@@ -86,17 +86,6 @@ const ProfileAvatarMenu = ({ user, size = 24, onPickWorkspaceFolder, align = 'le
             overflow: "hidden",
           }}
         >
-          <div
-            style={{
-              padding: "10px 14px",
-              fontSize: 14,
-              color: "#444",
-              borderBottom: "1px solid #eee",
-              background: "#fafafa",
-            }}
-          >
-            Tokens: {(user?.tokens ?? 0).toLocaleString()}
-          </div>
           <button
             type="button"
             role="menuitem"

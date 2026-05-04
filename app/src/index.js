@@ -1,6 +1,17 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import {
+  BrowserRouter,
+  HashRouter,
+  Routes,
+  Route,
+  useParams,
+  Navigate,
+} from "react-router-dom";
 import App from "./App";
+import { AuthProvider } from "./context/AuthContext";
+import ProjectComponent from "./components/editor/ProjectComponent";
+import platform, { isElectron } from "./platform";
 
 class RootErrorBoundary extends React.Component {
   constructor(props) {
@@ -33,6 +44,41 @@ class RootErrorBoundary extends React.Component {
   }
 }
 
+/**
+ * Editor route. Reads `:id` from the URL, hands it to the existing editor
+ * component. ProjectComponent already pulls the auth token via
+ * `platform.getEditorAuthToken()` (Electron: IPC, Web: localStorage), so
+ * nothing else needs threading through here.
+ */
+const ProjectRoute = () => {
+  const { id } = useParams();
+  if (!id) return <Navigate to="/" replace />;
+  return (
+    <div style={{ height: "100%", width: "100%", display: "flex" }}>
+      <ProjectComponent projectId={decodeURIComponent(id)} />
+    </div>
+  );
+};
+
+/**
+ * Electron loads us via `file://.../dist/index.html` so we can't rely on
+ * pushState-style routes. HashRouter sidesteps that. Web uses BrowserRouter
+ * for clean URLs.
+ */
+const Router = isElectron ? HashRouter : BrowserRouter;
+
+const Root = () => (
+  <Router>
+    <AuthProvider>
+      <Routes>
+        <Route path="/" element={<App />} />
+        <Route path="/project/:id" element={<ProjectRoute />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </AuthProvider>
+  </Router>
+);
+
 const container = document.getElementById("root");
 if (!container) {
   document.body.innerHTML =
@@ -41,7 +87,7 @@ if (!container) {
   const root = createRoot(container);
   root.render(
     <RootErrorBoundary>
-      <App />
+      <Root />
     </RootErrorBoundary>,
   );
 }

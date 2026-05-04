@@ -227,6 +227,57 @@ module.exports = function createAuthRouter(pool, requireAuth) {
     res.json({ user: req.user });
   });
 
+  router.get("/transactions", requireAuth, async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT id, delta, name, notes, created_at
+         FROM transactions
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT 200`,
+        [req.user.id],
+      );
+      const balRow = await pool.query(
+        `SELECT tokens FROM users WHERE id = $1`,
+        [req.user.id],
+      );
+      res.json({
+        tokens: balRow.rows[0]?.tokens ?? 0,
+        transactions: r.rows,
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Could not load transactions" });
+    }
+  });
+
+  router.get("/token-packages", requireAuth, (req, res) => {
+    const all = [
+      {
+        id: "starter",
+        label: "Starter",
+        tokens: 1000,
+        priceLabel: "$5",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_STARTER || "",
+      },
+      {
+        id: "creator",
+        label: "Creator",
+        tokens: 5000,
+        priceLabel: "$20",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_CREATOR || "",
+      },
+      {
+        id: "studio",
+        label: "Studio",
+        tokens: 20000,
+        priceLabel: "$70",
+        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_STUDIO || "",
+      },
+    ];
+    res.json({ packages: all.filter((p) => p.paymentLinkUrl) });
+  });
+
   router.post(
     "/profile-picture",
     requireAuth,

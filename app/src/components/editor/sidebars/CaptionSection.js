@@ -40,7 +40,6 @@ const CaptionSection = ({
       <select
         value={captionSettings.selectedFont}
         onChange={onFontChange}
-        onClick={() => window.electron.ipcRenderer.invoke('get-system-fonts')}
         style={selectStyle}
       >
         {availableFonts.map((font) => (

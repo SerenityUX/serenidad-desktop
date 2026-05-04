@@ -1,10 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import ProjectCard from './ProjectCard';
 import ProfileAvatarMenu from '../ProfileAvatarMenu';
+import TokensPill from '../TokensPill';
+import TokensModal from '../TokensModal';
+import NewProjectModal from './NewProjectModal';
 import { useAuth } from '../../context/AuthContext';
+import platform from '../../platform';
 
 /** Side rails match width so the title stays centered; fits the Create button + avatar */
-const HEADER_RAIL_WIDTH_PX = 88;
+const HEADER_RAIL_WIDTH_PX = 140;
 
 const createBtnStyle = {
   backgroundColor: '#1F93FF',
@@ -17,26 +21,21 @@ const createBtnStyle = {
   lineHeight: 1.2,
 };
 
-const FolderView = ({ projects }) => {
+const FolderView = ({
+  projects,
+  createOpen,
+  onOpenCreate,
+  onCloseCreate,
+  onCreateSubmit,
+  createResult,
+}) => {
   const { user, token } = useAuth();
-  const [isOverlayVisible, setOverlayVisible] = useState(false);
-
-  useEffect(() => {
-    const unsub = window.electron.ipcRenderer.on('close-modal', () =>
-      setOverlayVisible(false),
-    );
-    return () => unsub();
-  }, []);
-
-  const openCreateProjectModal = () => {
-    window.electron.ipcRenderer.send('open-modal');
-    setOverlayVisible(true);
-  };
+  const [tokensOpen, setTokensOpen] = useState(false);
 
   const handleProjectClick = async (project) => {
     if (!token || !project?.id) return;
     try {
-      await window.electron.openProjectWindow({
+      await platform.openProject({
         projectId: String(project.id),
         token,
       });
@@ -62,9 +61,13 @@ const FolderView = ({ projects }) => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'flex-start',
+          gap: 8,
         }}
         >
           <ProfileAvatarMenu user={user} size={24} />
+          {user ? (
+            <TokensPill tokens={user.tokens ?? 0} onClick={() => setTokensOpen(true)} />
+          ) : null}
         </div>
         <p style={{
           fontSize: 24,
@@ -85,7 +88,7 @@ const FolderView = ({ projects }) => {
         >
           <button
             type="button"
-            onClick={openCreateProjectModal}
+            onClick={onOpenCreate}
             style={createBtnStyle}
           >
             Create
@@ -111,17 +114,14 @@ const FolderView = ({ projects }) => {
         ))}
       </div>
 
-      {isOverlayVisible ? (
-        <div
-          aria-hidden={false}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 9999,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-          }}
-        />
-      ) : null}
+      <TokensModal open={tokensOpen} onClose={() => setTokensOpen(false)} />
+
+      <NewProjectModal
+        open={!!createOpen}
+        onClose={onCloseCreate}
+        onSubmit={onCreateSubmit}
+        pendingError={createResult}
+      />
     </div>
   );
 };

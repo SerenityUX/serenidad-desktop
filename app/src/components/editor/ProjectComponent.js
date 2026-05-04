@@ -11,6 +11,7 @@ import StoryboardView from './storyboard/StoryboardView';
 import { composeSceneToPng } from '../../lib/composeScene';
 import { encodeSegmentsToMp4 } from '../../lib/exportProject';
 import useVoicePrompt from '../../hooks/useVoicePrompt';
+import platform from '../../platform';
 
 const DEFAULT_IMAGE_DURATION = 2;
 const DEFAULT_VIDEO_DURATION = 4;
@@ -231,7 +232,7 @@ const ProjectComponent = ({ projectId }) => {
     let cancelled = false;
     (async () => {
       try {
-        const t = await window.electron.getViewerAuthToken();
+        const t = await platform.getEditorAuthToken();
         if (!cancelled) {
           setAuthToken(t || null);
           setAuthResolved(true);
@@ -1472,7 +1473,7 @@ const ProjectComponent = ({ projectId }) => {
     setSelectedScene(1);
     const fetchFonts = async () => {
       try {
-        const fonts = await window.electron.ipcRenderer.invoke('get-system-fonts');
+        const fonts = await platform.listSystemFonts();
         setAvailableFonts(fonts);
       } catch (error) {
         console.error('Error fetching fonts:', error);
@@ -1607,11 +1608,11 @@ const ProjectComponent = ({ projectId }) => {
     const w = imgW || 1280;
     const h = imgH || 720;
 
-    const targetPath = await window.electron.ipcRenderer.invoke('pick-export-path', {
+    const target = await platform.pickSavePath({
       suggestedName,
       extension: 'mp4',
     });
-    if (!targetPath) return null;
+    if (!target) return null;
 
     const segments = [];
     for (const s of scenes) {
@@ -1634,10 +1635,7 @@ const ProjectComponent = ({ projectId }) => {
         height: h,
         onProgress: (p) => setExportProgress(p),
       });
-      return await window.electron.ipcRenderer.invoke('write-export-buffer', {
-        path: targetPath,
-        buffer,
-      });
+      return await platform.writeFile(target, buffer);
     } finally {
       setExportProgress(null);
     }

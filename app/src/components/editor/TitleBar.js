@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import ProfileAvatarMenu from '../ProfileAvatarMenu';
+import TokensPill from '../TokensPill';
+import TokensModal from '../TokensModal';
 import VoiceIndicator from '../voice/VoiceIndicator';
 import { useAuth } from '../../context/AuthContext';
+import platform from '../../platform';
 
-const TrafficLight = ({ color, action }) => (
+const TrafficLight = ({ color, onClick }) => (
   <div
-    onClick={() => window.electron.ipcRenderer.invoke(action)}
+    onClick={onClick}
     style={{
       backgroundColor: color,
       width: 14,
@@ -73,7 +76,9 @@ const CenterSlot = ({ voice, projectName }) => {
 
 const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voice, projectName }) => {
   const { user } = useAuth();
+  const [tokensOpen, setTokensOpen] = useState(false);
   return (
+  <>
   <div style={{
     width: '100%',
     display: 'flex',
@@ -84,11 +89,15 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voi
     borderBottom: '1px solid #D9D9D9',
     WebkitAppRegion: 'drag',
   }}>
-    <div style={{ marginLeft: 12, display: 'flex', flexDirection: 'row', gap: 9 }}>
-      <TrafficLight color="#FE5F58" action="close-app" />
-      <TrafficLight color="#FEBC2F" action="minimize-app" />
-      <TrafficLight color="#28C840" action="maximize-app" />
-    </div>
+    {platform.capabilities.hasNativeChrome ? (
+      <div style={{ marginLeft: 12, display: 'flex', flexDirection: 'row', gap: 9 }}>
+        <TrafficLight color="#FE5F58" onClick={() => platform.window.close()} />
+        <TrafficLight color="#FEBC2F" onClick={() => platform.window.minimize()} />
+        <TrafficLight color="#28C840" onClick={() => platform.window.maximize()} />
+      </div>
+    ) : (
+      <div style={{ marginLeft: 12 }} />
+    )}
 
     <CenterSlot voice={voice} projectName={projectName} />
 
@@ -130,9 +139,14 @@ const TitleBar = ({ onExport, onShare, showExport = true, showShare = false, voi
           Export
         </button>
       )}
+      {user ? (
+        <TokensPill tokens={user.tokens ?? 0} onClick={() => setTokensOpen(true)} />
+      ) : null}
       {user ? <ProfileAvatarMenu user={user} size={24} align="right" /> : null}
     </div>
   </div>
+  <TokensModal open={tokensOpen} onClose={() => setTokensOpen(false)} />
+  </>
   );
 };
 

@@ -10,6 +10,7 @@
  */
 
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
+import platform from '../platform';
 
 const FPS = 30;
 const MICROS_PER_FRAME = Math.round(1_000_000 / FPS);
@@ -49,23 +50,14 @@ function loadImage(url) {
 }
 
 /**
- * Pull remote bytes through the Electron main process to dodge CORS — the
- * fal/storage URLs we hand back from the API don't always include
- * Access-Control-Allow-Origin, and a renderer-side `fetch` then fails with
- * a generic "Failed to fetch". The main process has no CORS, so it just
- * works. Falls back to a direct fetch in non-Electron contexts (web build).
+ * Pull remote bytes via the platform layer. Electron routes through main to
+ * dodge CORS; web hits the URL directly so the storage host MUST send
+ * Access-Control-Allow-Origin or this will throw.
  */
 async function fetchAsBlobUrl(url) {
-  const ipc = typeof window !== 'undefined' && window.electron?.ipcRenderer;
-  if (ipc) {
-    const { buffer, contentType } = await ipc.invoke('fetch-remote-bytes', url);
-    const view = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-    const blob = new Blob([view], { type: contentType || 'application/octet-stream' });
-    return URL.createObjectURL(blob);
-  }
-  const res = await fetch(url, { mode: 'cors' });
-  if (!res.ok) throw new Error(`Fetch failed (${res.status}) for ${url}`);
-  const blob = await res.blob();
+  const { buffer, contentType } = await platform.fetchBytes(url);
+  const view = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const blob = new Blob([view], { type: contentType || 'application/octet-stream' });
   return URL.createObjectURL(blob);
 }
 

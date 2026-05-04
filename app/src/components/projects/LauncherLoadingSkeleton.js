@@ -1,11 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import ProfileAvatarMenu from '../ProfileAvatarMenu';
+import TokensPill from '../TokensPill';
+import TokensModal from '../TokensModal';
 import { useAuth } from '../../context/AuthContext';
 
-const HEADER_RAIL_WIDTH_PX = 88;
+const HEADER_RAIL_WIDTH_PX = 140;
 
 const LauncherLoadingSkeleton = () => {
   const { user } = useAuth();
+  const [tokensOpen, setTokensOpen] = useState(false);
 
   return (
     <div style={{ minHeight: '100vh', background: '#FFFFFF' }}>
@@ -26,9 +29,13 @@ const LauncherLoadingSkeleton = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-start',
+            gap: 8,
           }}
         >
           {user ? <ProfileAvatarMenu user={user} size={24} /> : null}
+          {user ? (
+            <TokensPill tokens={user.tokens ?? 0} onClick={() => setTokensOpen(true)} />
+          ) : null}
         </div>
         <p
           style={{
@@ -66,6 +73,8 @@ const LauncherLoadingSkeleton = () => {
           </div>
         ))}
       </div>
+
+      <TokensModal open={tokensOpen} onClose={() => setTokensOpen(false)} />
     </div>
   );
 };
