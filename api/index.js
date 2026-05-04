@@ -7,6 +7,7 @@ const createAuthRouter = require("./routes/auth");
 const createRequireAuth = require("./middleware/requireAuth");
 const createProjectsRouter = require("./routes/projects");
 const createVoiceRouter = require("./routes/voice");
+const createBillingRouter = require("./routes/billing");
 const desktopVersion = require("./desktopVersion");
 
 const port = Number(process.env.PORT) || 3000;
@@ -26,6 +27,14 @@ async function main() {
 
   const app = express();
   app.use(cors());
+
+  // Stripe webhook MUST receive the raw request body so we can verify its
+  // signature — mount it BEFORE express.json so the parser doesn't consume
+  // the bytes Stripe signed.
+  if (dbOk) {
+    app.use("/billing", createBillingRouter(pool));
+  }
+
   app.use(express.json());
 
   app.get("/", (_req, res) => {

@@ -10,6 +10,7 @@
     "start": "node index.js",
     "start:deploy": "node scripts/migrate.js && node index.js",
     "db:migrate": "node scripts/migrate.js",
+    "stripe:setup": "node scripts/setupStripe.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -24,6 +25,7 @@
     "express": "^5.2.1",
     "multer": "^2.1.1",
     "pg": "^8.20.0",
-    "resend": "^6.12.2"
+    "resend": "^6.12.2",
+    "stripe": "^17.7.0"
   }
 }

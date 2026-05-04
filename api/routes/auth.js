@@ -9,6 +9,7 @@ const {
 } = require("../lib/otp");
 const { sendOtpEmail } = require("../lib/email");
 const { putProfileImage } = require("../lib/s3Upload");
+const { getPaymentLinkUrls } = require("../lib/stripeClient");
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -279,39 +280,48 @@ module.exports = function createAuthRouter(pool, requireAuth) {
   // Subscription = 20% margin → 80 tokens per $1.
   // One-time     = 30% margin → 70 tokens per $1, sold via a single Stripe
   //               payment link with adjustable quantity (1 unit = $1 = 70 tokens).
-  router.get("/token-packages", requireAuth, (req, res) => {
+  router.get("/token-packages", requireAuth, async (req, res) => {
+    // URLs come from Stripe at runtime (matched by kodan_id metadata that
+    // scripts/setupStripe.js wrote). The operator no longer needs to paste
+    // four STRIPE_PAYMENT_LINK_* env vars — only STRIPE_SECRET_KEY.
     const fallback = "https://stripe.com";
+    let links = {};
+    try {
+      links = await getPaymentLinkUrls();
+    } catch (e) {
+      console.warn("[token-packages] payment-link lookup failed:", e.message);
+    }
     const subscriptions = [
       {
         id: "sub_starter",
         label: "Starter",
         tokens: 800,
         priceLabel: "$10/mo",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_STARTER || fallback,
+        paymentLinkUrl: links.sub_starter || fallback,
       },
       {
         id: "sub_creator",
         label: "Creator",
         tokens: 2400,
         priceLabel: "$30/mo",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_CREATOR || fallback,
+        paymentLinkUrl: links.sub_creator || fallback,
       },
       {
         id: "sub_studio",
         label: "Studio",
         tokens: 12000,
         priceLabel: "$150/mo",
-        paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_SUB_STUDIO || fallback,
+        paymentLinkUrl: links.sub_studio || fallback,
       },
     ];
     const oneTime = {
-      // Stripe payment link should be configured with adjustable quantity,
+      // Stripe payment link is configured with adjustable quantity,
       // unit = $1, sold as 70 tokens per unit.
       tokensPerUnit: 70,
       dollarsPerUnit: 1,
       minDollars: 5,
       maxDollars: 500,
-      paymentLinkUrl: process.env.STRIPE_PAYMENT_LINK_BUY_TOKENS || fallback,
+      paymentLinkUrl: links.buy_tokens || fallback,
     };
     res.json({ subscriptions, oneTime });
   });
