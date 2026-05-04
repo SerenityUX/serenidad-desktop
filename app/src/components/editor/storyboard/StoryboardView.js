@@ -139,9 +139,9 @@ const RefThumb = ({ url }) => {
 const StoryboardView = ({
   scenes = [],
   aspectRatio = 16 / 9,
-  currentlyLoading = [],
+  loadingFrameIds = new Set(),
   progressMap = {},
-  creatingVideoSet = new Set(),
+  creatingVideoFrameIds = new Set(),
   onClose,
 }) => {
   const [page, setPage] = useState(0);
@@ -182,9 +182,11 @@ const StoryboardView = ({
         >
           {visible.map((scene, idxInPage) => {
             const sceneNumber = safePage * PAGE_SIZE + idxInPage + 1;
-            const isLoading =
-              currentlyLoading.includes(sceneNumber) ||
-              creatingVideoSet.has(sceneNumber);
+            const sceneFrameId = scene?.frameId;
+            const isLoading = sceneFrameId
+              ? (loadingFrameIds.has(sceneFrameId) ||
+                 creatingVideoFrameIds.has(sceneFrameId))
+              : false;
             return (
               <StoryboardCard
                 key={scene.id || sceneNumber}

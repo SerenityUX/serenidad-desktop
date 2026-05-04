@@ -327,6 +327,32 @@ ipcMain.handle('pick-export-path', async (_event, payload) => {
   return filePath.toLowerCase().endsWith(ext) ? filePath : `${filePath}${ext}`;
 });
 
+/**
+ * Fetch a remote URL from the main process so the renderer can dodge CORS.
+ * Used by the export pipeline (composeScene + exportProject), which needs
+ * raw bytes to draw remote images/videos onto a canvas — `fetch(url, {mode:
+ * 'cors'})` from the renderer fails with "Failed to fetch" against storage
+ * hosts that don't send Access-Control-Allow-Origin.
+ *
+ * Returns `{ buffer, contentType }`. `buffer` is a Node Buffer; Electron's
+ * structured-clone serializes it back to the renderer as a Uint8Array, which
+ * the renderer wraps in a Blob.
+ */
+ipcMain.handle('fetch-remote-bytes', async (_event, url) => {
+  if (!url || typeof url !== 'string') {
+    throw new Error('fetch-remote-bytes: url required');
+  }
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`fetch-remote-bytes: ${res.status} ${res.statusText} for ${url}`);
+  }
+  const ab = await res.arrayBuffer();
+  return {
+    buffer: Buffer.from(ab),
+    contentType: res.headers.get('content-type') || '',
+  };
+});
+
 ipcMain.handle('write-export-buffer', async (_event, payload) => {
   const { path: targetPath, buffer } = payload || {};
   if (!targetPath) throw new Error('No target path');

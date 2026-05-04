@@ -95,8 +95,11 @@ const ProjectComponent = ({ projectId }) => {
   const [voiceText, setVoiceText] = useState('');
   const [speakerWav, setSpeakerWav] = useState('Narrator');
 
-  // Prompt
-  const [prompt, setPrompt] = useState('');
+  // Prompt: NOT held as duplicated top-level state. We read directly from
+  // projectData.scenes[selectedScene-1].positivePrompt below, and write into
+  // the scene by frameId on every keystroke. This removes a whole class of
+  // bugs where a *different* scene's generation completing (and refetching
+  // projectData) would clobber the textarea while the user was typing.
   const [promptFocusToken, setPromptFocusToken] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
@@ -119,10 +122,11 @@ const ProjectComponent = ({ projectId }) => {
   // Per-scene duration input (hydrated when selectedScene changes). Used for
   // both image (hold time) and video (generation/playback) frames.
   const [sceneDuration, setSceneDuration] = useState(DEFAULT_IMAGE_DURATION);
-  const [creatingVideo, setCreatingVideo] = useState(false);
-  // Tracks which scene numbers are currently mid-video-generation; surfaced
-  // to the storyboard so its in-progress cells show a progress bar.
-  const [creatingVideoScenes, setCreatingVideoScenes] = useState(new Set());
+  // Frames currently mid-video-generation, keyed by stable frameId. Keying by
+  // frameId (rather than scene index) means inserting/removing/reordering
+  // frames mid-flight can't accidentally smear the loading state onto a
+  // different frame. Surfaced to the storyboard for in-progress indicators.
+  const [creatingVideoFrameIds, setCreatingVideoFrameIds] = useState(() => new Set());
   const [showStoryboard, setShowStoryboard] = useState(false);
   const [videoError, setVideoError] = useState(null);
   const [videoStatusMessage, setVideoStatusMessage] = useState('');
@@ -139,10 +143,14 @@ const ProjectComponent = ({ projectId }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const playTimerRef = useRef(null);
 
-  // Generation
-  const [currentlyLoading, setCurrentlyLoading] = useState([]);
+  // Generation: image-generation in-flight, keyed by stable frameId. Same
+  // reasoning as creatingVideoFrameIds — index-keyed loading state was
+  // bleeding across frames when new ones were inserted.
+  const [loadingFrameIds, setLoadingFrameIds] = useState(() => new Set());
   const [progressMap, setProgressMap] = useState({});
   const [progressMessageMap, setProgressMessageMap] = useState({});
+  // Per-frame button label override during generation (e.g. "Generating");
+  // keyed by frameId.
   const [generateImageText, setGenerateImageText] = useState({});
   const [currentFact, setCurrentFact] = useState('');
 
@@ -440,7 +448,6 @@ const ProjectComponent = ({ projectId }) => {
         return { ...prev, scenes: nextScenes };
       });
       setVoiceText('');
-      setPrompt('');
       setSelectedScene(insertAt + 1);
       setPromptFocusToken((t) => t + 1);
 
@@ -586,20 +593,36 @@ const ProjectComponent = ({ projectId }) => {
     });
 
   // ---------- Image generation ----------
-  const generateImage = async (sceneIndex) => {
-    const scene = projectData?.scenes?.[sceneIndex - 1];
-    if (!scene?.frameId || !authToken || !projectId) return;
-    const promptText = String(prompt || '').trim();
+  // Takes a frameId so the request is bound to a stable identity, not to a
+  // scene-index that may shift if frames are added/removed/reordered while
+  // the request is in flight.
+  const generateImage = async (frameId) => {
+    if (!frameId || !authToken || !projectId) return;
+    const scene = projectData?.scenes?.find((s) => s.frameId === frameId);
+    const promptText = String(scene?.positivePrompt || '').trim();
+    const clearLoading = () => {
+      setLoadingFrameIds((prev) => {
+        if (!prev.has(frameId)) return prev;
+        const next = new Set(prev);
+        next.delete(frameId);
+        return next;
+      });
+      setGenerateImageText((prev) => {
+        if (!(frameId in prev)) return prev;
+        const next = { ...prev };
+        delete next[frameId];
+        return next;
+      });
+    };
     if (!promptText) {
       window.alert('Enter a prompt first.');
-      setCurrentlyLoading((prev) => prev.filter((s) => s !== sceneIndex));
-      setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generate Visuals' }));
+      clearLoading();
       return;
     }
     try {
       const res = await fetch(
         apiUrl(
-          `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(scene.frameId)}/generate-image`,
+          `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(frameId)}/generate-image`,
         ),
         {
           method: 'POST',
@@ -622,18 +645,23 @@ const ProjectComponent = ({ projectId }) => {
         throw new Error(msg);
       }
       const pd = await refetchRemoteProject();
-      const thumb = body.frame?.result || pd?.scenes?.[sceneIndex - 1]?.thumbnail;
-      // Wait for the actual image bytes to land in the browser cache before
-      // flipping out of the loading state — otherwise we briefly show the
-      // empty Scene Visual placeholder while the network fetch finishes.
-      if (thumb) await loadThumbnail(thumb);
-      setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generate Visuals' }));
+      const sceneAfter = pd?.scenes?.find((s) => s.frameId === frameId);
+      const thumb = body.frame?.result || sceneAfter?.thumbnail;
+      // Only wait for the freshly generated bytes if the user is still
+      // looking at the same frame — otherwise we'd block the loading-state
+      // clear behind a thumbnail load they don't even see.
+      const stillOnFrame =
+        pd?.scenes?.[selectedScene - 1]?.frameId === frameId;
+      if (thumb && stillOnFrame) await loadThumbnail(thumb);
+      // Write the result back to projectData by frameId — never by index.
+      // This is what was previously clobbering the textarea on the *current*
+      // scene when a different scene's generation completed.
       setProjectData((prev) => {
         if (!prev) return prev;
         return {
           ...prev,
-          scenes: prev.scenes.map((s, i) =>
-            i === sceneIndex - 1
+          scenes: prev.scenes.map((s) =>
+            s.frameId === frameId
               ? {
                   ...s,
                   positivePrompt: promptText,
@@ -643,13 +671,11 @@ const ProjectComponent = ({ projectId }) => {
           ),
         };
       });
-      setPrompt(promptText);
     } catch (err) {
       console.error(err);
       window.alert(err.message || 'Generation failed');
-      setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generate Visuals' }));
     } finally {
-      setCurrentlyLoading((prev) => prev.filter((s) => s !== sceneIndex));
+      clearLoading();
     }
   };
 
@@ -854,8 +880,9 @@ const ProjectComponent = ({ projectId }) => {
   const generateVideoForCurrentFrame = async () => {
     if (!isRemote || !authToken || !projectId || !projectData) return;
     const scene = projectData.scenes[selectedScene - 1];
-    if (!scene?.frameId) return;
-    const promptText = String(prompt || '').trim();
+    const targetFrameId = scene?.frameId;
+    if (!targetFrameId) return;
+    const promptText = String(scene?.positivePrompt || '').trim();
     if (!promptText) {
       window.alert('Enter a video prompt first.');
       return;
@@ -864,11 +891,9 @@ const ProjectComponent = ({ projectId }) => {
     const augmentedPrompt = voiceline
       ? `${promptText}\n\nVoiceline (${speakerWav || 'Narrator'}): "${voiceline}"`
       : promptText;
-    const targetSceneNumber = selectedScene;
-    setCreatingVideo(true);
-    setCreatingVideoScenes((prev) => {
+    setCreatingVideoFrameIds((prev) => {
       const next = new Set(prev);
-      next.add(targetSceneNumber);
+      next.add(targetFrameId);
       return next;
     });
     setVideoError(null);
@@ -879,7 +904,7 @@ const ProjectComponent = ({ projectId }) => {
       setVideoStatusMessage('Generating video on fal.ai (this can take 30–90s)…');
       const res = await fetch(
         apiUrl(
-          `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(scene.frameId)}/generate-video`,
+          `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(targetFrameId)}/generate-video`,
         ),
         {
           method: 'POST',
@@ -907,19 +932,23 @@ const ProjectComponent = ({ projectId }) => {
       }
       setVideoStatusMessage('Loading clip…');
       const pd = await refetchRemoteProject();
-      const url = body.frame?.result || pd?.scenes?.[selectedScene - 1]?.thumbnail;
+      const sceneAfter = pd?.scenes?.find((s) => s.frameId === targetFrameId);
+      const url = body.frame?.result || sceneAfter?.thumbnail;
       if (!url) throw new Error('Server did not return a video URL.');
-      await loadThumbnail(url);
+      // Only swap the on-screen visual if the user is still on this frame.
+      if (pd?.scenes?.[selectedScene - 1]?.frameId === targetFrameId) {
+        await loadThumbnail(url);
+      }
       setVideoStatusMessage('');
     } catch (e) {
       console.error(e);
       setVideoError(String(e.message || 'Video generation failed'));
       setVideoStatusMessage('');
     } finally {
-      setCreatingVideo(false);
-      setCreatingVideoScenes((prev) => {
+      setCreatingVideoFrameIds((prev) => {
+        if (!prev.has(targetFrameId)) return prev;
         const next = new Set(prev);
-        next.delete(targetSceneNumber);
+        next.delete(targetFrameId);
         return next;
       });
     }
@@ -944,15 +973,21 @@ const ProjectComponent = ({ projectId }) => {
         setVoiceText('');
         setSelectedScene(pd.scenes.length);
         setReferences([]);
-        setPrompt('');
       })
       .catch((error) => console.error('Failed to add new scene:', error));
   };
 
   const startGenerationForScene = (sceneIndex) => {
-    setCurrentlyLoading((prev) => [...prev, sceneIndex]);
-    setGenerateImageText((prev) => ({ ...prev, [sceneIndex]: 'Generating' }));
-    generateImage(sceneIndex);
+    const frameId = projectData?.scenes?.[sceneIndex - 1]?.frameId;
+    if (!frameId) return;
+    setLoadingFrameIds((prev) => {
+      if (prev.has(frameId)) return prev;
+      const next = new Set(prev);
+      next.add(frameId);
+      return next;
+    });
+    setGenerateImageText((prev) => ({ ...prev, [frameId]: 'Generating' }));
+    generateImage(frameId);
   };
 
   // ---------- Fetch fal model catalog (remote only) ----------
@@ -982,41 +1017,54 @@ const ProjectComponent = ({ projectId }) => {
     return () => { cancelled = true; };
   }, [isRemote, authToken]);
 
-  // ---------- Sync scene-bound state when selection changes ----------
+  // ---------- Sync scene-bound state when SCENE SELECTION changes ----------
+  // Critically, this depends only on the *identity* of the selected frame,
+  // not on the whole projectData. Previously, any update to projectData
+  // (e.g. another scene's generation completing and refetching) would re-run
+  // this and overwrite whatever the user was currently typing in the
+  // prompt/voiceline/caption fields. The re-sync should fire only when the
+  // user actually navigates to a different frame.
+  const currentFrameIdForSync =
+    projectData?.scenes?.[selectedScene - 1]?.frameId || null;
   useEffect(() => {
-    if (projectData && projectData.scenes[selectedScene - 1]) {
-      setIsTransitioning(true);
-      const currentScene = projectData.scenes[selectedScene - 1];
-      setTimeout(() => {
-        setPrompt(currentScene.positivePrompt || '');
-        setReferences(Array.isArray(currentScene.references) ? currentScene.references : []);
-        setSelectedFalModel(currentScene.model || defaultFalModelId);
-        setVoiceText(currentScene.voiceline || '');
-        setSpeakerWav(currentScene.speaker || 'Narrator');
+    if (!currentFrameIdForSync || !projectData) return;
+    const currentScene = projectData.scenes.find(
+      (s) => s.frameId === currentFrameIdForSync,
+    );
+    if (!currentScene) return;
+    setIsTransitioning(true);
+    const id = setTimeout(() => {
+      setReferences(Array.isArray(currentScene.references) ? currentScene.references : []);
+      setSelectedFalModel(currentScene.model || defaultFalModelId);
+      setVoiceText(currentScene.voiceline || '');
+      setSpeakerWav(currentScene.speaker || 'Narrator');
 
-        setCaptionSettings((prev) => ({
-          ...prev,
-          ...currentScene.captionSettings,
-          fontSize: currentScene.captionSettings?.fontSize || 16,
-          captionColor: currentScene.captionSettings?.captionColor || '#FFE600',
-          caption: currentScene.captionSettings?.caption || '',
-          strokeColor: currentScene.captionSettings?.strokeColor || '#000000',
-          strokeSize: currentScene.captionSettings?.strokeSize || 1.5,
-          selectedFont: currentScene.captionSettings?.selectedFont || 'Arial',
-          selectedWeight: currentScene.captionSettings?.selectedWeight || '700',
-        }));
+      setCaptionSettings((prev) => ({
+        ...prev,
+        ...currentScene.captionSettings,
+        fontSize: currentScene.captionSettings?.fontSize || 16,
+        captionColor: currentScene.captionSettings?.captionColor || '#FFE600',
+        caption: currentScene.captionSettings?.caption || '',
+        strokeColor: currentScene.captionSettings?.strokeColor || '#000000',
+        strokeSize: currentScene.captionSettings?.strokeSize || 1.5,
+        selectedFont: currentScene.captionSettings?.selectedFont || 'Arial',
+        selectedWeight: currentScene.captionSettings?.selectedWeight || '700',
+      }));
 
-        setLocalCaption(currentScene.captionSettings?.caption || '');
-        setSceneDuration(
-          Number(currentScene.durationSeconds) ||
-            (currentScene.kind === 'video' ? DEFAULT_VIDEO_DURATION : DEFAULT_IMAGE_DURATION),
-        );
-        setVideoError(null);
-        setVideoStatusMessage('');
-        setIsTransitioning(false);
-      }, 50);
-    }
-  }, [selectedScene, projectData]);
+      setLocalCaption(currentScene.captionSettings?.caption || '');
+      setSceneDuration(
+        Number(currentScene.durationSeconds) ||
+          (currentScene.kind === 'video' ? DEFAULT_VIDEO_DURATION : DEFAULT_IMAGE_DURATION),
+      );
+      setVideoError(null);
+      setVideoStatusMessage('');
+      setIsTransitioning(false);
+    }, 50);
+    return () => clearTimeout(id);
+    // We intentionally exclude projectData from deps — it would re-fire this
+    // whenever any scene's data updates and clobber in-flight typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFrameIdForSync]);
 
   // ---------- Debounced persistence (frames table via API) ----------
   const persistCaptionSettings = useCallback(
@@ -1054,23 +1102,17 @@ const ProjectComponent = ({ projectId }) => {
     [selectedScene, projectData, persistCaptionSettings],
   );
 
-  const updateScenePrompts = useCallback(
-    debounce((positivePrompt) => {
-      const scene = projectData?.scenes?.[selectedScene - 1];
-      if (!scene?.frameId || !authToken) return;
-      patchFrame(scene.frameId, {
-        prompt: positivePrompt,
-      }).catch((error) => console.error('Failed to update scene prompts:', error));
-      setProjectData((prev) => ({
-        ...prev,
-        scenes: prev.scenes.map((s, i) =>
-          i === selectedScene - 1
-            ? { ...s, positivePrompt }
-            : s,
-        ),
-      }));
+  // Debounced API persist for the prompt. Keyed by frameId so a delayed
+  // network call can't write the wrong frame's prompt if the user has since
+  // navigated away.
+  const persistScenePromptToApi = useCallback(
+    debounce((frameId, positivePrompt) => {
+      if (!frameId || !authToken) return;
+      patchFrame(frameId, { prompt: positivePrompt }).catch((error) =>
+        console.error('Failed to update scene prompts:', error),
+      );
     }, 500),
-    [selectedScene, projectData, patchFrame, authToken],
+    [patchFrame, authToken],
   );
 
   const updateSceneFalModel = useCallback(
@@ -1228,10 +1270,23 @@ const ProjectComponent = ({ projectId }) => {
   );
 
   // ---------- Form change handlers ----------
+  // The textarea is a controlled input wired to the *scene's* positivePrompt
+  // (no top-level prompt state). Each keystroke writes optimistically into
+  // projectData by the current frame's id, then a debounced PATCH persists.
   const handlePromptChange = (event) => {
     const newPrompt = event.target.value;
-    setPrompt(newPrompt);
-    updateScenePrompts(newPrompt);
+    const frameId = projectData?.scenes?.[selectedScene - 1]?.frameId;
+    if (!frameId) return;
+    setProjectData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        scenes: prev.scenes.map((s) =>
+          s.frameId === frameId ? { ...s, positivePrompt: newPrompt } : s,
+        ),
+      };
+    });
+    persistScenePromptToApi(frameId, newPrompt);
   };
 
   const applyVoicelineToCaptionIfEmpty = useCallback(
@@ -1255,9 +1310,20 @@ const ProjectComponent = ({ projectId }) => {
         setSpeakerWav(nextSpeaker);
       }
       const trimmedPrompt = String(newPrompt || '').trim();
-      if (trimmedPrompt && trimmedPrompt !== prompt) {
-        setPrompt(trimmedPrompt);
-        updateScenePrompts(trimmedPrompt);
+      const frameId = projectData?.scenes?.[selectedScene - 1]?.frameId;
+      const currentPrompt =
+        projectData?.scenes?.[selectedScene - 1]?.positivePrompt || '';
+      if (trimmedPrompt && trimmedPrompt !== currentPrompt && frameId) {
+        setProjectData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            scenes: prev.scenes.map((s) =>
+              s.frameId === frameId ? { ...s, positivePrompt: trimmedPrompt } : s,
+            ),
+          };
+        });
+        persistScenePromptToApi(frameId, trimmedPrompt);
       }
       if (typeof voiceline === 'string') {
         const trimmedVoiceline = voiceline.trim();
@@ -1274,9 +1340,10 @@ const ProjectComponent = ({ projectId }) => {
       }
     },
     [
-      prompt,
+      selectedScene,
+      projectData,
       voiceText,
-      updateScenePrompts,
+      persistScenePromptToApi,
       updateSceneVoiceline,
       speakerWav,
       applyVoicelineToCaptionIfEmpty,
@@ -1286,7 +1353,8 @@ const ProjectComponent = ({ projectId }) => {
   const voice = useVoicePrompt({
     onUpdate: handleVoiceUpdate,
     getAuthToken: () => authToken,
-    getCurrentPrompt: () => prompt,
+    getCurrentPrompt: () =>
+      projectData?.scenes?.[selectedScene - 1]?.positivePrompt || '',
     getCurrentVoiceline: () => voiceText,
     getCurrentSpeaker: () => speakerWav,
     getAvailableSpeakers: () => VOICE_OPTIONS,
@@ -1639,10 +1707,17 @@ const ProjectComponent = ({ projectId }) => {
     return <ProjectLoadingSkeleton />;
   }
 
-  const generateDisabled =
-    prompt.trim() === '' || currentlyLoading.includes(selectedScene);
-
   const currentScene = projectData?.scenes?.[selectedScene - 1];
+  const currentFrameId = currentScene?.frameId || null;
+  const prompt = currentScene?.positivePrompt || '';
+  const isCurrentLoadingImage = currentFrameId
+    ? loadingFrameIds.has(currentFrameId)
+    : false;
+  const isCurrentCreatingVideo = currentFrameId
+    ? creatingVideoFrameIds.has(currentFrameId)
+    : false;
+  const generateDisabled =
+    prompt.trim() === '' || isCurrentLoadingImage;
   const isVideoFrame = currentScene?.kind === 'video';
 
   const handleSceneDurationChange = (event) => {
@@ -1690,10 +1765,10 @@ const ProjectComponent = ({ projectId }) => {
         sceneDuration,
         onSceneDurationChange: handleSceneDurationChange,
         generateLabel: isVideoFrame
-          ? (creatingVideo ? 'Creating Video…' : 'Create Video')
-          : (generateImageText[selectedScene] || 'Generate Visuals'),
+          ? (isCurrentCreatingVideo ? 'Creating Video…' : 'Create Video')
+          : (generateImageText[currentFrameId] || 'Generate Visuals'),
         generateDisabled: isVideoFrame
-          ? (creatingVideo || prompt.trim() === '' || !currentScene?.references?.length)
+          ? (isCurrentCreatingVideo || prompt.trim() === '' || !currentScene?.references?.length)
           : generateDisabled,
         onGenerate: isVideoFrame
           ? () => generateVideoForCurrentFrame()
@@ -1707,14 +1782,14 @@ const ProjectComponent = ({ projectId }) => {
         scenePreviewProps: {
           thumbnail,
           videoKey,
-          isLoading: currentlyLoading.includes(selectedScene) || creatingVideo,
+          isLoading: isCurrentLoadingImage || isCurrentCreatingVideo,
           progress: progressMap[selectedScene],
           fact: currentFact,
           prompt,
           onPromptChange: handlePromptChange,
           generateDisabled: isVideoFrame
-            ? (creatingVideo || prompt.trim() === '' || !currentScene?.references?.length)
-            : (prompt.trim() === '' || currentlyLoading.includes(selectedScene)),
+            ? (isCurrentCreatingVideo || prompt.trim() === '' || !currentScene?.references?.length)
+            : (prompt.trim() === '' || isCurrentLoadingImage),
           onGenerate: isVideoFrame
             ? () => generateVideoForCurrentFrame()
             : () => startGenerationForScene(selectedScene),
@@ -1775,7 +1850,8 @@ const ProjectComponent = ({ projectId }) => {
         pressedScene,
         isMouseDown,
         deletingScenes,
-        currentlyLoading,
+        loadingFrameIds,
+        creatingVideoFrameIds,
         thumbnail,
         aspectRatio: projectAspectRatio,
         canExportClip,
@@ -1841,9 +1917,9 @@ const ProjectComponent = ({ projectId }) => {
         <StoryboardView
           scenes={projectData?.scenes || []}
           aspectRatio={projectAspectRatio}
-          currentlyLoading={currentlyLoading}
+          loadingFrameIds={loadingFrameIds}
           progressMap={progressMap}
-          creatingVideoSet={creatingVideoScenes}
+          creatingVideoFrameIds={creatingVideoFrameIds}
           onClose={() => setShowStoryboard(false)}
         />
       </div>

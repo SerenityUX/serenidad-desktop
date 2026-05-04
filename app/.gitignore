@@ -10,6 +10,9 @@ lerna-debug.log*
 kodan-darwin-x64
 ./kodan-darwin-x64
 
+# electron-builder output
+release/
+
 LoRa
 ./LoRa
 # Diagnostic reports (https://nodejs.org/api/report.html)

@@ -7,7 +7,19 @@
  * (state → frame → encoder), kept lightweight by reusing the canvas API and
  * the fluent-ffmpeg wrapper that ships with the app.
  */
+/**
+ * Pull image bytes through the Electron main process to dodge CORS — same
+ * reasoning as exportProject.js. Renderer-side fetch fails with "Failed to
+ * fetch" against storage hosts that don't return CORS headers.
+ */
 async function loadImageBitmap(url) {
+  const ipc = typeof window !== 'undefined' && window.electron?.ipcRenderer;
+  if (ipc) {
+    const { buffer, contentType } = await ipc.invoke('fetch-remote-bytes', url);
+    const view = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    const blob = new Blob([view], { type: contentType || 'image/png' });
+    return await createImageBitmap(blob);
+  }
   const res = await fetch(url, { mode: 'cors' });
   if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
   const blob = await res.blob();

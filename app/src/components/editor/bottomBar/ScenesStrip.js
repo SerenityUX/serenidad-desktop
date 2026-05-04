@@ -105,7 +105,8 @@ const ScenesStrip = ({
   pressedScene,
   isMouseDown,
   deletingScenes,
-  currentlyLoading,
+  loadingFrameIds,
+  creatingVideoFrameIds,
   thumbnail,
   aspectRatio,
   canExportClip,
@@ -314,8 +315,12 @@ const ScenesStrip = ({
           const isMultiSelected =
             allSelected.length > 1 && allSelected.includes(sceneNumber);
           const inMultiSelectMode = allSelected.length > 1;
+          const selectedFrameId = scenes[selectedScene - 1]?.frameId;
+          const selectedIsLoading =
+            (loadingFrameIds && selectedFrameId && loadingFrameIds.has(selectedFrameId)) ||
+            (creatingVideoFrameIds && selectedFrameId && creatingVideoFrameIds.has(selectedFrameId));
           const showActionIcons =
-            (!deletingScenes.has(selectedScene) && !currentlyLoading.includes(selectedScene)) || thumbnail != null;
+            (!deletingScenes.has(selectedScene) && !selectedIsLoading) || thumbnail != null;
 
           return (
             <React.Fragment key={scene.id}>
