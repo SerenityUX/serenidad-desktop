@@ -24,3 +24,6 @@ npm-error.log*
 
 # API build output (if added later)
 api/dist/
+
+# Intermediate video files
+app/public/capybara_unlooped.mp4

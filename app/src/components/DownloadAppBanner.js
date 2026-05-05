@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { isElectron } from '../platform';
 import { asset } from '../lib/asset';
+import { useAuth } from '../context/AuthContext';
 
 const STORAGE_KEY = 'kodan_download_banner_dismissed';
 const ZIP_URL =
@@ -22,7 +23,9 @@ const DownloadAppBanner = () => {
   // Landing page (`/`) is intentionally chrome-free — no banner there.
   const { pathname } = useLocation();
   const onLanding = pathname === '/';
-  const visible = !isElectron && !dismissed && !onLanding;
+  const { ready, user } = useAuth();
+  const signedOut = ready && !user;
+  const visible = !isElectron && !dismissed && !onLanding && !signedOut;
 
   useEffect(() => {
     const root = document.documentElement;
