@@ -143,5 +143,36 @@ module.exports = function createAnalyticsRouter(pool, requireAuth) {
     }
   });
 
+  // Admin-only token grant. Inserts a positive `transactions` row; the
+  // existing trigger (migration 007) keeps users.tokens in sync.
+  router.post("/grant", express.json(), async (req, res) => {
+    const userId = String(req.body?.userId || "").trim();
+    const amount = Number(req.body?.amount);
+    const note = String(req.body?.note || "").slice(0, 500);
+    if (!userId) return res.status(400).json({ error: "userId required" });
+    if (!Number.isFinite(amount) || amount === 0 || !Number.isInteger(amount)) {
+      return res.status(400).json({ error: "amount must be a non-zero integer" });
+    }
+    if (Math.abs(amount) > 1_000_000) {
+      return res.status(400).json({ error: "amount out of range" });
+    }
+    try {
+      const u = await pool.query(`SELECT id FROM users WHERE id = $1`, [userId]);
+      if (u.rows.length === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      await pool.query(
+        `INSERT INTO transactions (user_id, delta, name, notes)
+         VALUES ($1, $2, $3, $4)`,
+        [userId, amount, "Admin grant", note || `Granted by ${req.user.email}`],
+      );
+      const bal = await pool.query(`SELECT tokens FROM users WHERE id = $1`, [userId]);
+      res.json({ ok: true, tokens: bal.rows[0]?.tokens ?? 0 });
+    } catch (e) {
+      console.error("[analytics/grant]", e);
+      res.status(500).json({ error: "Could not apply grant" });
+    }
+  });
+
   return router;
 };

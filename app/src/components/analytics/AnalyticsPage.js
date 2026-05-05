@@ -259,6 +259,11 @@ const AnalyticsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedUserId, setSelectedUserId] = useState(null);
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [grantAmount, setGrantAmount] = useState("");
+  const [grantNote, setGrantNote] = useState("");
+  const [grantBusy, setGrantBusy] = useState(false);
+  const [grantError, setGrantError] = useState(null);
 
   const isAdmin = user?.role === "admin";
 
@@ -296,6 +301,45 @@ const AnalyticsPage = () => {
     () => users.find((u) => u.id === selectedUserId) || null,
     [users, selectedUserId],
   );
+
+  const submitGrant = async () => {
+    if (!selectedUser) return;
+    const amount = parseInt(String(grantAmount).trim(), 10);
+    if (!Number.isFinite(amount) || amount === 0) {
+      setGrantError("Enter a non-zero integer (use a negative number to deduct).");
+      return;
+    }
+    setGrantBusy(true);
+    setGrantError(null);
+    try {
+      const res = await fetch(apiUrl("/analytics/grant"), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: selectedUser.id,
+          amount,
+          note: grantNote.trim() || undefined,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === selectedUser.id ? { ...u, tokens: body.tokens } : u,
+        ),
+      );
+      setGrantOpen(false);
+      setGrantAmount("");
+      setGrantNote("");
+    } catch (e) {
+      setGrantError(String(e.message || e));
+    } finally {
+      setGrantBusy(false);
+    }
+  };
 
   if (!ready) return <LauncherLoadingSkeleton />;
   if (!user) return <AuthScreen />;
@@ -387,22 +431,179 @@ const AnalyticsPage = () => {
                 {selectedUser.tokens ?? 0} tokens
               </div>
             </div>
-            <a
-              href={gmailComposeUrl(selectedUser.email)}
-              target="_blank"
-              rel="noopener noreferrer"
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => {
+                  setGrantError(null);
+                  setGrantOpen(true);
+                }}
+                style={{
+                  background: "#fff",
+                  color: "#1F93FF",
+                  border: "1px solid #1F93FF",
+                  padding: "8px 14px",
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                Give grant
+              </button>
+              <a
+                href={gmailComposeUrl(selectedUser.email)}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  background: "#1F93FF",
+                  color: "#fff",
+                  padding: "8px 14px",
+                  borderRadius: 6,
+                  fontSize: 13,
+                  textDecoration: "none",
+                  fontWeight: 500,
+                }}
+              >
+                Compose email
+              </a>
+            </div>
+          </div>
+        )}
+
+        {grantOpen && selectedUser && (
+          <div
+            onClick={() => !grantBusy && setGrantOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.4)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1000,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
               style={{
-                background: "#1F93FF",
-                color: "#fff",
-                padding: "8px 14px",
-                borderRadius: 6,
-                fontSize: 13,
-                textDecoration: "none",
-                fontWeight: 500,
+                background: "#fff",
+                borderRadius: 8,
+                padding: 20,
+                width: 400,
+                maxWidth: "90vw",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
               }}
             >
-              Compose email
-            </a>
+              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
+                Give grant
+              </div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
+                {selectedUser.name} ({selectedUser.email}) — current balance{" "}
+                {selectedUser.tokens ?? 0} tokens
+              </div>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  color: "#6b7280",
+                  marginBottom: 4,
+                }}
+              >
+                Amount (tokens, negative to deduct)
+              </label>
+              <input
+                type="number"
+                value={grantAmount}
+                onChange={(e) => setGrantAmount(e.target.value)}
+                placeholder="e.g. 1000"
+                disabled={grantBusy}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  fontSize: 14,
+                  border: "1px solid #d1d5db",
+                  borderRadius: 6,
+                  marginBottom: 12,
+                  boxSizing: "border-box",
+                }}
+              />
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  color: "#6b7280",
+                  marginBottom: 4,
+                }}
+              >
+                Note (optional)
+              </label>
+              <input
+                type="text"
+                value={grantNote}
+                onChange={(e) => setGrantNote(e.target.value)}
+                placeholder="Reason for grant"
+                disabled={grantBusy}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  fontSize: 14,
+                  border: "1px solid #d1d5db",
+                  borderRadius: 6,
+                  marginBottom: 12,
+                  boxSizing: "border-box",
+                }}
+              />
+              {grantError && (
+                <div
+                  style={{
+                    color: "#991b1b",
+                    fontSize: 13,
+                    marginBottom: 12,
+                  }}
+                >
+                  {grantError}
+                </div>
+              )}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                }}
+              >
+                <button
+                  onClick={() => setGrantOpen(false)}
+                  disabled={grantBusy}
+                  style={{
+                    background: "#fff",
+                    color: "#374151",
+                    border: "1px solid #d1d5db",
+                    padding: "8px 14px",
+                    borderRadius: 6,
+                    fontSize: 13,
+                    cursor: grantBusy ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitGrant}
+                  disabled={grantBusy}
+                  style={{
+                    background: "#1F93FF",
+                    color: "#fff",
+                    border: 0,
+                    padding: "8px 14px",
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: grantBusy ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {grantBusy ? "Granting…" : "Grant"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
