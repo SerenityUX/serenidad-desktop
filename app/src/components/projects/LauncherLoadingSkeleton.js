@@ -45,7 +45,7 @@ const LauncherLoadingSkeleton = () => {
             justifySelf: 'stretch',
           }}
         >
-          Kōdan Anime Studio
+          CoCreate Cafe
         </p>
         <div style={{ width: HEADER_RAIL_WIDTH_PX }} />
       </div>

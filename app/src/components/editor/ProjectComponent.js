@@ -161,8 +161,8 @@ const ProjectComponent = ({ projectId }) => {
   useDocumentMeta(
     projectData?.name
       ? {
-          title: `${projectData.name} — Kōdan`,
-          description: `Storyboard for "${projectData.name}" on Kōdan Anime Studio.`,
+          title: `${projectData.name} — CoCreate Cafe`,
+          description: `Storyboard for "${projectData.name}" on CoCreate Cafe.`,
           image: projectData?.scenes?.[0]?.thumbnail || undefined,
         }
       : undefined,

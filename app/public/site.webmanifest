@@ -1,6 +1,6 @@
 {
-  "name": "Kōdan Anime Studio",
-  "short_name": "Kōdan",
+  "name": "CoCreate Cafe",
+  "short_name": "CoCreate",
   "description": "Storyboard and direct anime shorts, scene by scene.",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },

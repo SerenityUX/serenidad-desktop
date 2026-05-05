@@ -94,7 +94,7 @@ const DownloadAppBanner = () => {
             fontWeight: 500,
           }}
         >
-          Download Kōdan Desktop App
+          Download CoCreate Cafe Desktop App
         </span>
       </span>
       <button

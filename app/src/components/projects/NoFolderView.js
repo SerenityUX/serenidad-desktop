@@ -2,9 +2,9 @@ import React from 'react';
 
 const NoFolderView = ({ onSelectFolder }) => (
   <div>
-    <h1>Welcome to Kōdan</h1>
-    <p>Please select your Kōdan folder to get started.</p>
-    <button onClick={onSelectFolder}>Select Your Kōdan Folder</button>
+    <h1>Welcome to CoCreate Cafe</h1>
+    <p>Please select your CoCreate Cafe folder to get started.</p>
+    <button onClick={onSelectFolder}>Select Your CoCreate Cafe Folder</button>
   </div>
 );
 

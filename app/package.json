@@ -35,7 +35,7 @@
   },
   "build": {
     "appId": "app.serenidad.desktop",
-    "productName": "Serenidad",
+    "productName": "CoCreate Cafe",
     "directories": {
       "output": "release"
     },
@@ -79,7 +79,7 @@
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
-      "title": "Serenidad ${version}",
+      "title": "CoCreate Cafe ${version}",
       "icon": "KodanFlower.icns"
     }
   }

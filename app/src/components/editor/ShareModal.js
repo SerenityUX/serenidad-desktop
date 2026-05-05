@@ -125,7 +125,7 @@ const ShareModal = ({ projectId, authToken, onClose }) => {
         setMessage({ type: 'error', text: body.error || 'Could not share' });
       } else {
         const baseText = body.pending
-          ? `Sent ${value} an invite to Serenidad.`
+          ? `Sent ${value} an invite to CoCreate Cafe.`
           : body.alreadyShared
             ? `${value} already had access — re-sent the email.`
             : `Shared with ${value} and sent a notification email.`;

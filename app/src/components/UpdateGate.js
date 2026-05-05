@@ -87,7 +87,7 @@ const UpdateGate = ({ children }) => {
               marginBottom: 20,
             }}
           >
-            A newer version of Serenidad is available
+            A newer version of CoCreate Cafe is available
             {latest.version ? ` (${latest.version})` : ''}. You're on{' '}
             {CURRENT_VERSION}. Please download and install the update to
             continue.
@@ -117,7 +117,7 @@ const UpdateGate = ({ children }) => {
               lineHeight: 1.5,
             }}
           >
-            After downloading, quit Serenidad and replace the app in your
+            After downloading, quit CoCreate Cafe and replace the app in your
             Applications folder, then reopen.
           </div>
         </div>
