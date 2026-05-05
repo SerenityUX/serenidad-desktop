@@ -63,6 +63,21 @@ const ProjectRoute = () => {
   );
 };
 
+const ExternalRedirect = ({ to }) => {
+  React.useEffect(() => {
+    window.location.replace(to);
+  }, [to]);
+  return null;
+};
+
+const StoryRedirect = () => {
+  const { slug } = useParams();
+  const target = `https://cocreateblog.vercel.app/stories/${encodeURIComponent(
+    slug ? decodeURIComponent(slug) : ""
+  )}`;
+  return <ExternalRedirect to={target} />;
+};
+
 /**
  * Electron loads us via `file://.../dist/index.html` so we can't rely on
  * pushState-style routes. HashRouter sidesteps that. Web uses BrowserRouter
@@ -103,6 +118,15 @@ const Root = () => (
             />
             <Route path="/home" element={<App />} />
             <Route path="/project/:id" element={<ProjectRoute />} />
+            <Route
+              path="/dalifornia"
+              element={
+                <ExternalRedirect
+                  to="https://cocreateblog.vercel.app/stories/30%20Days%20in%20China's%20California"
+                />
+              }
+            />
+            <Route path="/stories/:slug" element={<StoryRedirect />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
