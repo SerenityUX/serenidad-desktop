@@ -365,7 +365,7 @@ const AuthScreen = () => {
           >
             <img
               src={flowerSrc}
-              alt="CoCreate Cafe"
+              alt="CoCreate"
               style={{ width: 88, height: 88, objectFit: "contain" }}
             />
           </div>

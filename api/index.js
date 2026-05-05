@@ -8,6 +8,8 @@ const createRequireAuth = require("./middleware/requireAuth");
 const createProjectsRouter = require("./routes/projects");
 const createVoiceRouter = require("./routes/voice");
 const createBillingRouter = require("./routes/billing");
+const createAnalyticsRouter = require("./routes/analytics");
+const createLogRequest = require("./middleware/logRequest");
 const desktopVersion = require("./desktopVersion");
 
 const port = Number(process.env.PORT) || 3000;
@@ -47,9 +49,16 @@ async function main() {
 
   if (dbOk) {
     const requireAuth = createRequireAuth(pool);
+    const logRequest = createLogRequest(pool);
+    // Log every authenticated request for the analytics dashboard. Mounting
+    // logger BEFORE the routers (with requireAuth running per-route) means
+    // unauth'd requests get a NULL user_id but still appear in the log,
+    // which is what we want for traffic visibility.
+    app.use(logRequest);
     app.use("/auth", createAuthRouter(pool, requireAuth));
     app.use("/projects", createProjectsRouter(pool, requireAuth));
     app.use("/voice", createVoiceRouter(pool, requireAuth));
+    app.use("/analytics", createAnalyticsRouter(pool, requireAuth));
   }
 
   const server = app.listen(port, () => {

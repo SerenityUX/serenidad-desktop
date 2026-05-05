@@ -15,6 +15,7 @@ import platform, { isElectron } from "./platform";
 import DownloadAppBanner from "./components/DownloadAppBanner";
 import LandingPage from "./components/LandingPage";
 import UpdateGate from "./components/UpdateGate";
+import AnalyticsPage from "./components/analytics/AnalyticsPage";
 
 class RootErrorBoundary extends React.Component {
   constructor(props) {
@@ -117,6 +118,9 @@ const Root = () => (
               element={isElectron ? <App /> : <LandingPage />}
             />
             <Route path="/home" element={<App />} />
+            <Route path="/login" element={<Navigate to="/home" replace />} />
+            <Route path="/signup" element={<Navigate to="/home" replace />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/project/:id" element={<ProjectRoute />} />
             <Route
               path="/dalifornia"

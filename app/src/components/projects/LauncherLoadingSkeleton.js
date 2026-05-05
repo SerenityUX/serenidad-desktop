@@ -45,7 +45,7 @@ const LauncherLoadingSkeleton = () => {
             justifySelf: 'stretch',
           }}
         >
-          CoCreate Cafe
+          CoCreate
         </p>
         <div style={{ width: HEADER_RAIL_WIDTH_PX }} />
       </div>

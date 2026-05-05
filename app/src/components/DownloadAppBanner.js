@@ -94,7 +94,7 @@ const DownloadAppBanner = () => {
             fontWeight: 500,
           }}
         >
-          Download CoCreate Cafe Desktop App
+          Download CoCreate Desktop App
         </span>
       </span>
       <button

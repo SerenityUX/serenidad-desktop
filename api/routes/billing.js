@@ -77,10 +77,17 @@ module.exports = function createBillingRouter(pool) {
         } else if (event.type === "invoice.payment_succeeded") {
           await handleInvoicePaid(pool, event.data.object);
         } else if (event.type === "customer.subscription.deleted") {
-          // Renewals stop firing once a sub is deleted, so there's nothing
-          // for us to do at runtime — just log so the timeline is visible.
+          // Drop the user back to the free 'user' role so MRR drops too.
+          const sub = event.data.object;
+          const userId = sub.metadata?.kodan_user_id;
+          if (userId) {
+            await pool.query(
+              `UPDATE users SET role = 'user' WHERE id = $1 AND role <> 'admin'`,
+              [userId],
+            );
+          }
           console.log(
-            `[stripe-webhook] subscription deleted: ${event.data.object.id}`,
+            `[stripe-webhook] subscription deleted: ${sub.id}`,
           );
         } else {
           console.log(`[stripe-webhook] ignored event type: ${event.type}`);
@@ -126,12 +133,13 @@ async function handleCheckoutCompleted(pool, session) {
   }
 
   if (session.mode === "subscription") {
-    const tokens = await tokensForSubscriptionSession(session);
+    const { tokens, tier } = await tokensForSubscriptionSession(session);
     if (!tokens) return;
     await creditTokens(pool, userId, tokens, {
       name: "Subscription start",
       notes: `Stripe sub ${session.subscription}`,
     });
+    if (tier) await setUserRole(pool, userId, tier);
     // Stamp user id onto the subscription so renewal invoices can credit
     // the right account without us having to scan back to a checkout
     // session every cycle.
@@ -178,6 +186,7 @@ async function handleInvoicePaid(pool, invoice) {
     name: "Subscription renewal",
     notes: `Stripe sub ${sub.id} invoice ${invoice.id}`,
   });
+  await setUserRole(pool, userId, tier);
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────
@@ -202,9 +211,24 @@ async function tokensForSubscriptionSession(session) {
     console.warn(
       `[stripe-webhook] subscription checkout has unknown price ${priceId}`,
     );
-    return 0;
+    return { tokens: 0, tier: null };
   }
-  return tokens;
+  return { tokens, tier };
+}
+
+// Map Stripe tier id (sub_starter/sub_creator/sub_studio) → user role.
+async function setUserRole(pool, userId, tier) {
+  const role = String(tier || "").replace(/^sub_/, "");
+  if (!["starter", "creator", "studio"].includes(role)) return;
+  try {
+    // Don't demote admins.
+    await pool.query(
+      `UPDATE users SET role = $2 WHERE id = $1 AND role <> 'admin'`,
+      [userId, role],
+    );
+  } catch (e) {
+    console.warn(`[stripe-webhook] setUserRole failed: ${e.message}`);
+  }
 }
 
 async function creditTokens(pool, userId, delta, { name, notes }) {

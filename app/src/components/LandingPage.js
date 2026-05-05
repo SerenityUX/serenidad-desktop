@@ -276,8 +276,22 @@ const LandingPage = () => {
         >
           <div style={{ fontSize: 20, fontWeight: 600 }}>Co-Create</div>
           <div style={{ display: 'flex', gap: 20, fontSize: 16 }}>
-            <span style={{ cursor: 'pointer' }}>Signup</span>
-            <span style={{ cursor: 'pointer' }}>Login</span>
+            <span
+              style={{ cursor: 'pointer' }}
+              onClick={() => {
+                window.location.href = '/signup';
+              }}
+            >
+              Signup
+            </span>
+            <span
+              style={{ cursor: 'pointer' }}
+              onClick={() => {
+                window.location.href = '/login';
+              }}
+            >
+              Login
+            </span>
           </div>
         </div>
       </header>

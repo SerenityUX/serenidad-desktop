@@ -88,7 +88,7 @@ const CenterSlot = ({ voice, projectName }) => {
         textOverflow: 'ellipsis',
       }}
     >
-      {projectName && projectName.trim() ? projectName : 'CoCreate Cafe'}
+      {projectName && projectName.trim() ? projectName : 'CoCreate'}
     </p>
   );
 };

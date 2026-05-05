@@ -516,43 +516,49 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       ? frameRow.reference_urls
       : [];
 
-    const debitClient = await pool.connect();
-    try {
-      await debitClient.query("BEGIN");
-      const bal = await debitClient.query(
-        `SELECT tokens FROM users WHERE id = $1 FOR UPDATE`,
-        [req.user.id],
-      );
-      const current = bal.rows[0]?.tokens ?? 0;
-      if (current < tokenCost) {
-        await debitClient.query("ROLLBACK");
-        return res.status(402).json({
-          error: "Insufficient tokens",
-          tokens: current,
-          required: tokenCost,
-        });
+    // Admins have unlimited tokens — skip debit/refund entirely.
+    const isAdmin = req.user.role === "admin";
+
+    if (!isAdmin) {
+      const debitClient = await pool.connect();
+      try {
+        await debitClient.query("BEGIN");
+        const bal = await debitClient.query(
+          `SELECT tokens FROM users WHERE id = $1 FOR UPDATE`,
+          [req.user.id],
+        );
+        const current = bal.rows[0]?.tokens ?? 0;
+        if (current < tokenCost) {
+          await debitClient.query("ROLLBACK");
+          return res.status(402).json({
+            error: "Insufficient tokens",
+            tokens: current,
+            required: tokenCost,
+          });
+        }
+        await debitClient.query(
+          `INSERT INTO transactions (user_id, delta, name, notes, frame_id)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            req.user.id,
+            -tokenCost,
+            "Image generation",
+            `${model.id} frame ${frameId}`,
+            frameId,
+          ],
+        );
+        await debitClient.query("COMMIT");
+      } catch (e) {
+        await debitClient.query("ROLLBACK").catch(() => {});
+        debitClient.release();
+        console.error(e);
+        return res.status(500).json({ error: "Could not debit tokens" });
       }
-      await debitClient.query(
-        `INSERT INTO transactions (user_id, delta, name, notes, frame_id)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [
-          req.user.id,
-          -tokenCost,
-          "Image generation",
-          `${model.id} frame ${frameId}`,
-          frameId,
-        ],
-      );
-      await debitClient.query("COMMIT");
-    } catch (e) {
-      await debitClient.query("ROLLBACK").catch(() => {});
       debitClient.release();
-      console.error(e);
-      return res.status(500).json({ error: "Could not debit tokens" });
     }
-    debitClient.release();
 
     const refundTokens = async (notes) => {
+      if (isAdmin) return;
       try {
         await pool.query(
           `INSERT INTO transactions (user_id, delta, name, notes, frame_id)
@@ -676,35 +682,40 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     }
 
     const tokenCost = Math.max(1, Math.ceil(model.costCents));
-    const debitClient = await pool.connect();
-    try {
-      await debitClient.query("BEGIN");
-      const bal = await debitClient.query(
-        `SELECT tokens FROM users WHERE id = $1 FOR UPDATE`,
-        [req.user.id],
-      );
-      const current = bal.rows[0]?.tokens ?? 0;
-      if (current < tokenCost) {
-        await debitClient.query("ROLLBACK");
-        return res
-          .status(402)
-          .json({ error: "Insufficient tokens", tokens: current, required: tokenCost });
+    const isAdmin = req.user.role === "admin";
+
+    if (!isAdmin) {
+      const debitClient = await pool.connect();
+      try {
+        await debitClient.query("BEGIN");
+        const bal = await debitClient.query(
+          `SELECT tokens FROM users WHERE id = $1 FOR UPDATE`,
+          [req.user.id],
+        );
+        const current = bal.rows[0]?.tokens ?? 0;
+        if (current < tokenCost) {
+          await debitClient.query("ROLLBACK");
+          return res
+            .status(402)
+            .json({ error: "Insufficient tokens", tokens: current, required: tokenCost });
+        }
+        await debitClient.query(
+          `INSERT INTO transactions (user_id, delta, name, notes, frame_id)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [req.user.id, -tokenCost, "Video generation", `${model.id} frame ${frameId}`, frameId],
+        );
+        await debitClient.query("COMMIT");
+      } catch (e) {
+        await debitClient.query("ROLLBACK").catch(() => {});
+        debitClient.release();
+        console.error(e);
+        return res.status(500).json({ error: "Could not debit tokens" });
       }
-      await debitClient.query(
-        `INSERT INTO transactions (user_id, delta, name, notes, frame_id)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [req.user.id, -tokenCost, "Video generation", `${model.id} frame ${frameId}`, frameId],
-      );
-      await debitClient.query("COMMIT");
-    } catch (e) {
-      await debitClient.query("ROLLBACK").catch(() => {});
       debitClient.release();
-      console.error(e);
-      return res.status(500).json({ error: "Could not debit tokens" });
     }
-    debitClient.release();
 
     const refundTokens = async (notes) => {
+      if (isAdmin) return;
       try {
         await pool.query(
           `INSERT INTO transactions (user_id, delta, name, notes, frame_id)

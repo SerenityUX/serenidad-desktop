@@ -78,7 +78,7 @@ export default async function handler(req) {
   if (!htmlRes.ok) {
     // Fail open: if for some reason the static HTML isn't available, fall
     // back to a minimal shell rather than 500.
-    return new Response('<!doctype html><title>CoCreate Cafe</title>', {
+    return new Response('<!doctype html><title>CoCreate</title>', {
       status: 200,
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
@@ -95,10 +95,10 @@ export default async function handler(req) {
         const data = await apiRes.json();
         const name = data?.name || '';
         if (name) {
-          const title = `${name} — CoCreate Cafe`;
+          const title = `${name} — CoCreate`;
           const desc =
             data?.description ||
-            `Storyboard for "${name}" on CoCreate Cafe.`;
+            `Storyboard for "${name}" on CoCreate.`;
           const image = data?.thumbnailUrl || `${reqUrl.origin}/icon-512.png`;
 
           html = replaceTitle(html, title);
