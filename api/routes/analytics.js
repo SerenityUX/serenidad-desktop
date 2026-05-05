@@ -143,6 +143,27 @@ module.exports = function createAnalyticsRouter(pool, requireAuth) {
     }
   });
 
+  // List a single user's projects so admin can drill in from the users table.
+  router.get("/users/:id/projects", async (req, res) => {
+    const userId = String(req.params.id || "").trim();
+    if (!userId) return res.status(400).json({ error: "userId required" });
+    try {
+      const r = await pool.query(
+        `SELECT p.id, p.name, p.thumbnail, p.width, p.height,
+                p.created_at, p.frame_ids,
+                COALESCE(array_length(p.frame_ids, 1), 0) AS frame_count
+         FROM projects p
+         WHERE p.owner_id = $1
+         ORDER BY p.created_at DESC, p.id DESC`,
+        [userId],
+      );
+      res.json({ projects: r.rows });
+    } catch (e) {
+      console.error("[analytics/users/projects]", e);
+      res.status(500).json({ error: "Could not load projects" });
+    }
+  });
+
   // Admin-only token grant. Inserts a positive `transactions` row; the
   // existing trigger (migration 007) keeps users.tokens in sync.
   router.post("/grant", express.json(), async (req, res) => {

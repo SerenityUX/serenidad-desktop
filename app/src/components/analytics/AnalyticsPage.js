@@ -264,6 +264,9 @@ const AnalyticsPage = () => {
   const [grantNote, setGrantNote] = useState("");
   const [grantBusy, setGrantBusy] = useState(false);
   const [grantError, setGrantError] = useState(null);
+  const [userProjects, setUserProjects] = useState([]);
+  const [userProjectsLoading, setUserProjectsLoading] = useState(false);
+  const [userProjectsError, setUserProjectsError] = useState(null);
 
   const isAdmin = user?.role === "admin";
 
@@ -301,6 +304,34 @@ const AnalyticsPage = () => {
     () => users.find((u) => u.id === selectedUserId) || null,
     [users, selectedUserId],
   );
+
+  useEffect(() => {
+    if (!selectedUserId || !isAdmin) {
+      setUserProjects([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setUserProjectsLoading(true);
+      setUserProjectsError(null);
+      try {
+        const res = await fetch(
+          apiUrl(`/analytics/users/${selectedUserId}/projects`),
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+        if (!cancelled) setUserProjects(body.projects || []);
+      } catch (e) {
+        if (!cancelled) setUserProjectsError(String(e.message || e));
+      } finally {
+        if (!cancelled) setUserProjectsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedUserId, isAdmin, token]);
 
   const submitGrant = async () => {
     if (!selectedUser) return;
@@ -467,6 +498,77 @@ const AnalyticsPage = () => {
                 Compose email
               </a>
             </div>
+          </div>
+        )}
+
+        {selectedUser && (
+          <div style={{ ...card, marginTop: 12, padding: 0 }}>
+            <div
+              style={{
+                padding: "10px 16px",
+                borderBottom: "1px solid #f3f4f6",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#374151",
+              }}
+            >
+              {selectedUser.name}'s projects
+            </div>
+            {userProjectsLoading ? (
+              <div style={{ padding: 16, color: "#9ca3af", fontSize: 13 }}>
+                Loading…
+              </div>
+            ) : userProjectsError ? (
+              <div style={{ padding: 16, color: "#991b1b", fontSize: 13 }}>
+                {userProjectsError}
+              </div>
+            ) : userProjects.length === 0 ? (
+              <div style={{ padding: 16, color: "#9ca3af", fontSize: 13 }}>
+                No projects.
+              </div>
+            ) : (
+              <table
+                style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}
+              >
+                <thead style={{ background: "#f9fafb" }}>
+                  <tr style={{ textAlign: "left", color: "#6b7280" }}>
+                    <th style={{ padding: "10px 12px" }}>Name</th>
+                    <th style={{ padding: "10px 12px" }}>Size</th>
+                    <th style={{ padding: "10px 12px" }}>Frames</th>
+                    <th style={{ padding: "10px 12px" }}>Created</th>
+                    <th style={{ padding: "10px 12px" }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {userProjects.map((p) => (
+                    <tr key={p.id} style={{ borderTop: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: "10px 12px" }}>{p.name}</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        {p.width}×{p.height}
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>{p.frame_count}</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        {fmtDate(p.created_at)}
+                      </td>
+                      <td style={{ padding: "10px 12px", textAlign: "right" }}>
+                        <a
+                          href={`/project/${p.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            color: "#1F93FF",
+                            textDecoration: "none",
+                            fontWeight: 500,
+                          }}
+                        >
+                          Open ↗
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
 

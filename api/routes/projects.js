@@ -52,7 +52,10 @@ const referenceUpload = multer({
   },
 });
 
-async function getProjectIfAccessible(pool, projectId, userId) {
+async function getProjectIfAccessible(pool, projectId, user) {
+  // Back-compat: accept either a user object {id, role} or a raw user id.
+  const userId = typeof user === "string" ? user : user?.id;
+  const isAdmin = typeof user === "object" && user?.role === "admin";
   const r = await pool.query(
     `SELECT p.id,
             p.name,
@@ -62,17 +65,20 @@ async function getProjectIfAccessible(pool, projectId, userId) {
             p.owner_id,
             p.frame_ids,
             p.created_at,
-            CASE WHEN p.owner_id = $2 THEN 'owner' ELSE 'invited' END AS membership
+            CASE WHEN p.owner_id = $2 THEN 'owner'
+                 WHEN $3 THEN 'admin'
+                 ELSE 'invited' END AS membership
      FROM projects p
      WHERE p.id = $1
        AND (
-         p.owner_id = $2
+         $3
+         OR p.owner_id = $2
          OR EXISTS (
            SELECT 1 FROM invites i
            WHERE i.project_id = p.id AND i.sent_to = $2
          )
        )`,
-    [projectId, userId],
+    [projectId, userId, isAdmin],
   );
   return r.rows[0] || null;
 }
@@ -262,7 +268,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     if (!isUuid(projectId)) {
       return res.status(400).json({ error: "Invalid project id" });
     }
-    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
     if (!proj) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -305,7 +311,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     if (!isUuid(projectId) || !isUuid(frameId)) {
       return res.status(400).json({ error: "Invalid id" });
     }
-    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
     if (!proj) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -389,7 +395,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       if (!isUuid(projectId) || !isUuid(frameId)) {
         return res.status(400).json({ error: "Invalid id" });
       }
-      const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+      const proj = await getProjectIfAccessible(pool, projectId, req.user);
       if (!proj) {
         return res.status(404).json({ error: "Project not found" });
       }
@@ -452,7 +458,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     if (!isUuid(projectId) || !isUuid(frameId)) {
       return res.status(400).json({ error: "Invalid id" });
     }
-    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
     if (!proj) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -484,7 +490,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     if (!isUuid(projectId) || !isUuid(frameId)) {
       return res.status(400).json({ error: "Invalid id" });
     }
-    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
     if (!proj) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -641,7 +647,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     if (!isUuid(projectId) || !isUuid(frameId)) {
       return res.status(400).json({ error: "Invalid id" });
     }
-    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
     if (!proj) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -804,7 +810,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     if (!isUuid(projectId)) {
       return res.status(400).json({ error: "Invalid project id" });
     }
-    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
     if (!proj) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -845,7 +851,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     if (!isUuid(projectId) || !isUuid(frameId)) {
       return res.status(400).json({ error: "Invalid id" });
     }
-    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
     if (!proj) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -881,7 +887,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       return res.status(400).json({ error: "Invalid project id" });
     }
     try {
-      const proj = await getProjectIfAccessible(pool, id, req.user.id);
+      const proj = await getProjectIfAccessible(pool, id, req.user);
       if (!proj) {
         return res.status(404).json({ error: "Project not found" });
       }
@@ -942,7 +948,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     if (!isUuid(projectId)) {
       return res.status(400).json({ error: "Invalid project id" });
     }
-    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
     if (!proj) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -971,7 +977,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     if (!isUuid(projectId) || !isUuid(userId)) {
       return res.status(400).json({ error: "Invalid id" });
     }
-    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
     if (!proj) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -1005,7 +1011,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       return res.status(400).json({ error: "Invalid email" });
     }
 
-    const proj = await getProjectIfAccessible(pool, projectId, req.user.id);
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
     if (!proj) {
       return res.status(404).json({ error: "Project not found" });
     }
