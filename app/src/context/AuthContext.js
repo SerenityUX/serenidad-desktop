@@ -125,11 +125,11 @@ export function AuthProvider({ children }) {
     clearSession();
   }, [clearSession]);
 
-  const requestSignup = useCallback(async (email, name) => {
+  const requestSignup = useCallback(async (email, name, promo) => {
     const res = await fetch(apiUrl("/auth/signup"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, name }),
+      body: JSON.stringify({ email, name, promo: promo || undefined }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {

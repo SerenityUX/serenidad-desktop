@@ -15,6 +15,7 @@ import ProjectComponent from "./components/editor/ProjectComponent";
 import platform, { isElectron } from "./platform";
 import DownloadAppBanner from "./components/DownloadAppBanner";
 import LandingPage from "./components/LandingPage";
+import TenBuckScreen from "./components/auth/TenBuckScreen";
 import UpdateGate from "./components/UpdateGate";
 import AnalyticsPage from "./components/analytics/AnalyticsPage";
 
@@ -123,6 +124,7 @@ const Root = () => (
             <Route path="/login" element={<Navigate to="/home" replace />} />
             <Route path="/signup" element={<Navigate to="/home" replace />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/tenbuck" element={<TenBuckScreen />} />
             <Route path="/project/:id" element={<ProjectRoute />} />
             <Route
               path="/dalifornia"

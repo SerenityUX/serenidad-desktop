@@ -30,9 +30,18 @@ module.exports = function createAuthRouter(pool, requireAuth) {
     return String(email || "").trim().toLowerCase();
   }
 
+  // Promo codes accepted at signup time. Each maps to a credit applied
+  // on first /verify-otp. Keep this list short and explicit — anything
+  // not in here is silently ignored.
+  const PROMO_GRANTS = {
+    tenbuck: 1000,
+  };
+
   router.post("/signup", async (req, res) => {
     const email = normalizeEmail(req.body?.email);
     const name = String(req.body?.name || "").trim();
+    const rawPromo = String(req.body?.promo || "").trim().toLowerCase();
+    const promo = rawPromo && PROMO_GRANTS[rawPromo] ? rawPromo : null;
     if (!email || !email.includes("@")) {
       return res.status(400).json({ error: "Invalid email" });
     }
@@ -66,19 +75,19 @@ module.exports = function createAuthRouter(pool, requireAuth) {
         }
         ins = await pool.query(
           `UPDATE users
-           SET name = $2, otp = $3, otp_expires_at = $4
+           SET name = $2, otp = $3, otp_expires_at = $4, signup_promo = $5
            WHERE id = $1
            RETURNING id`,
-          [existing.rows[0].id, name, otpHash, expires],
+          [existing.rows[0].id, name, otpHash, expires, promo],
         );
         upgradedExisting = true;
       } else {
         try {
           ins = await pool.query(
-            `INSERT INTO users (name, email, otp, otp_expires_at)
-             VALUES ($1, $2, $3, $4)
+            `INSERT INTO users (name, email, otp, otp_expires_at, signup_promo)
+             VALUES ($1, $2, $3, $4, $5)
              RETURNING id`,
-            [name, email, otpHash, expires],
+            [name, email, otpHash, expires, promo],
           );
         } catch (insertErr) {
           if (insertErr.code === "23505") {
@@ -184,7 +193,7 @@ module.exports = function createAuthRouter(pool, requireAuth) {
     try {
       const r = await pool.query(
         `SELECT id, name, email, profile_picture, otp, otp_expires_at, created_at, tokens, role,
-                otp_attempts, otp_locked_until, pending_signup
+                otp_attempts, otp_locked_until, pending_signup, signup_promo
          FROM users WHERE email = $1`,
         [email],
       );
@@ -241,17 +250,34 @@ module.exports = function createAuthRouter(pool, requireAuth) {
       );
 
       let tokensBalance = row.tokens ?? 0;
-      // Welcome grant: $1 worth of tokens (100) on first successful verify.
+      // Welcome grant on first successful verify. /tenbuck signups get
+      // ✻1000; everyone else gets the standard ✻100 ($1).
       if (row.pending_signup) {
+        const promo = row.signup_promo || null;
+        const grantAmount =
+          promo && PROMO_GRANTS[promo] ? PROMO_GRANTS[promo] : 100;
+        const grantLabel = promo === "tenbuck" ? "Welcome credit (Shiba Buck)" : "Welcome credit";
+        const grantNote =
+          promo === "tenbuck"
+            ? "Free $10 from /tenbuck"
+            : "Free $1 to get started";
         try {
           await pool.query(
             `INSERT INTO transactions (user_id, delta, name, notes)
              VALUES ($1, $2, $3, $4)`,
-            [row.id, 100, "Welcome credit", "Free $1 to get started"],
+            [row.id, grantAmount, grantLabel, grantNote],
           );
-          tokensBalance = (tokensBalance || 0) + 100;
+          tokensBalance = (tokensBalance || 0) + grantAmount;
         } catch (grantErr) {
           console.error("welcome grant failed:", grantErr);
+        }
+        try {
+          await pool.query(
+            `UPDATE users SET signup_promo = NULL WHERE id = $1`,
+            [row.id],
+          );
+        } catch (clearErr) {
+          console.error("clearing signup_promo failed:", clearErr);
         }
       }
 
