@@ -6,8 +6,11 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const DESKTOP_VERSION = require('./package.json').version;
 
-const DEFAULT_SERENIDAD_API =
+const PROD_SERENIDAD_API =
   process.env.SERENIDAD_API_URL || 'https://api.serenidad.click';
+// `npm run dev:web` boots the Express API on :3000 alongside Vite — point the
+// renderer at it so chat/characters/etc. hit the local server in dev.
+const DEV_SERENIDAD_API = process.env.SERENIDAD_API_URL || 'http://localhost:3000';
 
 /**
  * Two targets, one config:
@@ -21,8 +24,10 @@ const DEFAULT_SERENIDAD_API =
  * `process.env.SERENIDAD_API_URL` is replaced at build time so existing
  * code in `src/config.js` keeps working without a Vite-specific rename.
  */
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const isElectron = mode === 'electron';
+  const isDevServe = command === 'serve';
+  const apiUrl = isDevServe ? DEV_SERENIDAD_API : PROD_SERENIDAD_API;
   return {
     base: isElectron ? './' : '/',
     // Project uses .js for JSX files (not .jsx) — tell the React plugin to
@@ -41,7 +46,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     define: {
-      'process.env.SERENIDAD_API_URL': JSON.stringify(DEFAULT_SERENIDAD_API),
+      'process.env.SERENIDAD_API_URL': JSON.stringify(apiUrl),
       'process.env.DESKTOP_VERSION': JSON.stringify(DESKTOP_VERSION),
     },
     build: {

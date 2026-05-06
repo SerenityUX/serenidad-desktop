@@ -2,8 +2,16 @@ const express = require("express");
 const crypto = require("crypto");
 const multer = require("multer");
 const { isProbablyAssetUrl } = require("../lib/assetUrl");
+const {
+  PROJECT_STYLES,
+  DEFAULT_STYLE_LABEL,
+  resolveStyleSuffix,
+  isValidStyleLabel,
+} = require("../lib/styles");
 const { generateFalImage } = require("../lib/falImage");
 const { generateFalVideo } = require("../lib/falVideo");
+const { applyCharacterPrompt } = require("../lib/characterPrompt");
+const { extractMentionedCharacters } = require("../lib/mentions");
 const {
   FAL_IMAGE_MODELS,
   FAL_VIDEO_MODELS,
@@ -13,6 +21,7 @@ const {
   resolveVideoModelOrDefault,
 } = require("../lib/falModels");
 const { putProfileImage } = require("../lib/s3Upload");
+const { emit } = require("../lib/realtime");
 const {
   sendProjectShareEmail,
   sendProjectInviteSignupEmail,
@@ -25,7 +34,7 @@ function isUuid(s) {
   return typeof s === "string" && UUID_RE.test(s);
 }
 
-const FRAME_COLUMNS = `id, prompt, result, reference_urls, model, meta, created_at`;
+const FRAME_COLUMNS = `id, prompt, result, reference_urls, character_ids, model, meta, created_at`;
 
 const REFERENCE_MIME_EXT = {
   "image/jpeg": ".jpg",
@@ -52,6 +61,23 @@ const referenceUpload = multer({
   },
 });
 
+/**
+ * Load the named characters in the same order as `ids`. Missing ids are
+ * silently dropped (e.g. if the user deleted a character that was still
+ * bound to a frame).
+ */
+async function loadCharactersOrdered(pool, projectId, ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  const r = await pool.query(
+    `SELECT id, name, description, image_url
+       FROM characters
+      WHERE project_id = $1 AND id = ANY($2::uuid[])`,
+    [projectId, ids],
+  );
+  const byId = new Map(r.rows.map((row) => [row.id, row]));
+  return ids.map((id) => byId.get(id)).filter(Boolean);
+}
+
 async function getProjectIfAccessible(pool, projectId, user) {
   // Back-compat: accept either a user object {id, role} or a raw user id.
   const userId = typeof user === "string" ? user : user?.id;
@@ -62,6 +88,7 @@ async function getProjectIfAccessible(pool, projectId, user) {
             p.thumbnail,
             p.width,
             p.height,
+            p.style,
             p.owner_id,
             p.frame_ids,
             p.created_at,
@@ -144,6 +171,13 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
 
   router.use(requireAuth);
 
+  router.get("/styles", (_req, res) => {
+    res.json({
+      styles: PROJECT_STYLES.map((s) => ({ id: s.id, label: s.label })),
+      defaultLabel: DEFAULT_STYLE_LABEL,
+    });
+  });
+
   router.get("/models", (_req, res) => {
     res.json({
       models: FAL_IMAGE_MODELS.map((m) => ({
@@ -224,14 +258,18 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       height = 720;
     }
 
+    const styleLabel = isValidStyleLabel(req.body?.style)
+      ? String(req.body.style).trim()
+      : DEFAULT_STYLE_LABEL;
+
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       const ins = await client.query(
-        `INSERT INTO projects (name, thumbnail, owner_id, width, height)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, name, thumbnail, width, height, owner_id, frame_ids, created_at`,
-        [name, thumbnailRaw, req.user.id, width, height],
+        `INSERT INTO projects (name, thumbnail, owner_id, width, height, style)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, name, thumbnail, width, height, style, owner_id, frame_ids, created_at`,
+        [name, thumbnailRaw, req.user.id, width, height, styleLabel],
       );
       const row = ins.rows[0];
       const f1 = await client.query(
@@ -260,6 +298,97 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       return res.status(500).json({ error: "Could not create project" });
     } finally {
       client.release();
+    }
+  });
+
+  /**
+   * Rename a project. Owner-only; collaborators with an invite can read but
+   * not relabel the project.
+   */
+  router.patch("/:projectId", async (req, res) => {
+    const { projectId } = req.params;
+    if (!isUuid(projectId)) {
+      return res.status(400).json({ error: "Invalid project id" });
+    }
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
+    if (!proj) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    if (proj.owner_id !== req.user.id) {
+      return res
+        .status(403)
+        .json({ error: "Only the owner can rename this project" });
+    }
+    const sets = [];
+    const vals = [];
+    let pi = 1;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
+      const name = String(req.body.name ?? "").trim();
+      if (!name) return res.status(400).json({ error: "Name is required" });
+      if (name.length > 200) return res.status(400).json({ error: "Name is too long" });
+      sets.push(`name = $${pi++}`);
+      vals.push(name);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "style")) {
+      const styleLabel = String(req.body.style ?? "").trim();
+      if (!isValidStyleLabel(styleLabel)) {
+        return res.status(400).json({ error: "Invalid style" });
+      }
+      sets.push(`style = $${pi++}`);
+      vals.push(styleLabel);
+    }
+    if (sets.length === 0) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+    vals.push(projectId);
+    try {
+      const r = await pool.query(
+        `UPDATE projects SET ${sets.join(", ")}
+         WHERE id = $${pi}
+         RETURNING id, name, thumbnail, width, height, style, owner_id, frame_ids, created_at`,
+        vals,
+      );
+      return res.json({ project: r.rows[0] });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Could not update project" });
+    }
+  });
+
+  /**
+   * Smart delete. If the caller owns the project we cascade-delete the
+   * project (frames, chats, characters, invites all share ON DELETE CASCADE).
+   * If the caller is an invited collaborator we only remove their own
+   * invite — the project itself stays put for the owner and other invitees.
+   * Admin acts as owner here.
+   */
+  router.delete("/:projectId", async (req, res) => {
+    const { projectId } = req.params;
+    if (!isUuid(projectId)) {
+      return res.status(400).json({ error: "Invalid project id" });
+    }
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
+    if (!proj) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const isOwner =
+      proj.owner_id === req.user.id || req.user?.role === "admin";
+    try {
+      if (isOwner) {
+        await pool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+        return res.json({ deleted: "project" });
+      }
+      const del = await pool.query(
+        `DELETE FROM invites WHERE project_id = $1 AND sent_to = $2 RETURNING id`,
+        [projectId, req.user.id],
+      );
+      if (del.rows.length === 0) {
+        return res.status(404).json({ error: "No invite to remove" });
+      }
+      return res.json({ deleted: "invite" });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Could not remove project" });
     }
   });
 
@@ -295,11 +424,30 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
           .status(400)
           .json({ error: "frame_ids must match the project's frames exactly" });
       }
+      const prevOrderR = await pool.query(
+        `SELECT frame_ids FROM projects WHERE id = $1`,
+        [projectId],
+      );
+      const prevOrder = prevOrderR.rows[0]?.frame_ids || [];
       await pool.query(
         `UPDATE projects SET frame_ids = $1::uuid[] WHERE id = $2`,
         [incoming, projectId],
       );
-      return res.json({ frame_ids: incoming });
+      const ev = await emit(
+        pool,
+        projectId,
+        "frame.reordered",
+        { frame_ids: incoming },
+        {
+          source: "user",
+          actorId: req.user.id,
+          inverse: {
+            kind: "frame.reordered",
+            payload: { frame_ids: prevOrder },
+          },
+        },
+      );
+      return res.json({ frame_ids: incoming, eventSeq: Number(ev.id) });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ error: "Could not reorder frames" });
@@ -339,6 +487,14 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       sets.push(`reference_urls = $${pi++}::text[]`);
       vals.push(cleaned);
     }
+    if (Object.prototype.hasOwnProperty.call(patch, "character_ids")) {
+      const arr = Array.isArray(patch.character_ids) ? patch.character_ids : [];
+      const cleaned = arr
+        .map((u) => String(u || "").trim())
+        .filter((u) => isUuid(u));
+      sets.push(`character_ids = $${pi++}::uuid[]`);
+      vals.push(cleaned);
+    }
     if (Object.prototype.hasOwnProperty.call(patch, "result")) {
       const r = patch.result;
       if (r != null && r !== "" && !isProbablyAssetUrl(String(r))) {
@@ -360,6 +516,13 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     const projPh = pi++;
     vals.push(frameId, projectId);
     try {
+      // Snapshot previous values for the inverse, so undo restores exactly the
+      // fields this PATCH touched.
+      const prevR = await pool.query(
+        `SELECT ${FRAME_COLUMNS} FROM frames WHERE id = $1 AND project_id = $2`,
+        [frameId, projectId],
+      );
+      const prev = prevR.rows[0];
       const u = await pool.query(
         `UPDATE frames SET ${sets.join(", ")}
          WHERE id = $${idPh} AND project_id = $${projPh}
@@ -369,7 +532,30 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       if (u.rows.length === 0) {
         return res.status(404).json({ error: "Frame not found" });
       }
-      return res.json({ frame: u.rows[0] });
+      const next = u.rows[0];
+      const changedFields = {};
+      const inverseFields = {};
+      for (const k of ["prompt", "model", "reference_urls", "character_ids", "result", "meta"]) {
+        if (Object.prototype.hasOwnProperty.call(patch, k)) {
+          changedFields[k] = next[k];
+          inverseFields[k] = prev ? prev[k] : null;
+        }
+      }
+      const ev = await emit(
+        pool,
+        projectId,
+        "frame.updated",
+        { id: frameId, fields: changedFields },
+        {
+          source: "user",
+          actorId: req.user.id,
+          inverse: {
+            kind: "frame.updated",
+            payload: { id: frameId, fields: inverseFields },
+          },
+        },
+      );
+      return res.json({ frame: next, eventSeq: Number(ev.id) });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ error: "Could not update frame" });
@@ -485,6 +671,123 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     }
   });
 
+  // Bind a character to a frame. Order matters: characters are appended in
+  // bind order and that order maps to Character1, Character2, ... in the
+  // rewritten generation prompt. Re-binding an already-bound character is a
+  // no-op (the existing position is preserved).
+  router.post("/:projectId/frames/:frameId/characters", async (req, res) => {
+    const { projectId, frameId } = req.params;
+    if (!isUuid(projectId) || !isUuid(frameId)) {
+      return res.status(400).json({ error: "Invalid id" });
+    }
+    const proj = await getProjectIfAccessible(pool, projectId, req.user);
+    if (!proj) return res.status(404).json({ error: "Project not found" });
+    const characterId = String(req.body?.characterId || "").trim();
+    if (!isUuid(characterId)) {
+      return res.status(400).json({ error: "characterId required" });
+    }
+    const exists = await pool.query(
+      `SELECT 1 FROM characters WHERE id = $1 AND project_id = $2`,
+      [characterId, projectId],
+    );
+    if (exists.rows.length === 0) {
+      return res.status(404).json({ error: "Character not found" });
+    }
+    try {
+      const prevR = await pool.query(
+        `SELECT character_ids FROM frames WHERE id = $1 AND project_id = $2`,
+        [frameId, projectId],
+      );
+      if (prevR.rows.length === 0) {
+        return res.status(404).json({ error: "Frame not found" });
+      }
+      const prev = Array.isArray(prevR.rows[0].character_ids)
+        ? prevR.rows[0].character_ids
+        : [];
+      if (prev.includes(characterId)) {
+        const u = await pool.query(
+          `SELECT ${FRAME_COLUMNS} FROM frames WHERE id = $1 AND project_id = $2`,
+          [frameId, projectId],
+        );
+        return res.json({ frame: u.rows[0], alreadyBound: true });
+      }
+      const next = [...prev, characterId];
+      const u = await pool.query(
+        `UPDATE frames SET character_ids = $1::uuid[]
+          WHERE id = $2 AND project_id = $3
+          RETURNING ${FRAME_COLUMNS}`,
+        [next, frameId, projectId],
+      );
+      await emit(
+        pool,
+        projectId,
+        "frame.updated",
+        { id: frameId, fields: { character_ids: next } },
+        {
+          source: "user",
+          actorId: req.user.id,
+          inverse: {
+            kind: "frame.updated",
+            payload: { id: frameId, fields: { character_ids: prev } },
+          },
+        },
+      );
+      return res.json({ frame: u.rows[0] });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Could not bind character" });
+    }
+  });
+
+  router.delete(
+    "/:projectId/frames/:frameId/characters/:characterId",
+    async (req, res) => {
+      const { projectId, frameId, characterId } = req.params;
+      if (!isUuid(projectId) || !isUuid(frameId) || !isUuid(characterId)) {
+        return res.status(400).json({ error: "Invalid id" });
+      }
+      const proj = await getProjectIfAccessible(pool, projectId, req.user);
+      if (!proj) return res.status(404).json({ error: "Project not found" });
+      try {
+        const prevR = await pool.query(
+          `SELECT character_ids FROM frames WHERE id = $1 AND project_id = $2`,
+          [frameId, projectId],
+        );
+        if (prevR.rows.length === 0) {
+          return res.status(404).json({ error: "Frame not found" });
+        }
+        const prev = Array.isArray(prevR.rows[0].character_ids)
+          ? prevR.rows[0].character_ids
+          : [];
+        const next = prev.filter((id) => id !== characterId);
+        const u = await pool.query(
+          `UPDATE frames SET character_ids = $1::uuid[]
+            WHERE id = $2 AND project_id = $3
+            RETURNING ${FRAME_COLUMNS}`,
+          [next, frameId, projectId],
+        );
+        await emit(
+          pool,
+          projectId,
+          "frame.updated",
+          { id: frameId, fields: { character_ids: next } },
+          {
+            source: "user",
+            actorId: req.user.id,
+            inverse: {
+              kind: "frame.updated",
+              payload: { id: frameId, fields: { character_ids: prev } },
+            },
+          },
+        );
+        return res.json({ frame: u.rows[0] });
+      } catch (e) {
+        console.error(e);
+        return res.status(500).json({ error: "Could not unbind character" });
+      }
+    },
+  );
+
   router.post("/:projectId/frames/:frameId/generate-image", async (req, res) => {
     const { projectId, frameId } = req.params;
     if (!isUuid(projectId) || !isUuid(frameId)) {
@@ -500,7 +803,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     }
 
     const frameCheck = await pool.query(
-      `SELECT id, model, reference_urls FROM frames WHERE id = $1 AND project_id = $2`,
+      `SELECT id, model, reference_urls, character_ids FROM frames WHERE id = $1 AND project_id = $2`,
       [frameId, projectId],
     );
     if (frameCheck.rows.length === 0) {
@@ -518,9 +821,18 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     }
 
     const tokenCost = Math.max(1, Math.ceil(model.costCents));
-    const referenceUrls = Array.isArray(frameRow.reference_urls)
+    const manualReferenceUrls = Array.isArray(frameRow.reference_urls)
       ? frameRow.reference_urls
       : [];
+    // `@Name` mentions in the prompt ARE the binding — slot order = mention
+    // order. No separate bind/unbind concept any more.
+    const projectCharacters = (
+      await pool.query(
+        `SELECT id, name, description, image_url FROM characters WHERE project_id = $1`,
+        [projectId],
+      )
+    ).rows;
+    const charactersOrdered = extractMentionedCharacters(prompt, projectCharacters);
 
     // Admins have unlimited tokens — skip debit/refund entirely.
     const isAdmin = req.user.role === "admin";
@@ -576,11 +888,26 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       }
     };
 
+    // Apply character-aware rewriting first: substitutes @Name → Character{N}
+    // (Name), prepends a binding clause, and prepends portraits to the
+    // reference list in slot order.
+    const rewritten = applyCharacterPrompt({
+      prompt,
+      characters: charactersOrdered,
+      manualReferenceUrls,
+    });
+    const referenceUrls = rewritten.referenceUrls;
+    const styleSuffix = resolveStyleSuffix(proj.style);
+    const finalPrompt =
+      styleSuffix && !rewritten.prompt.toLowerCase().includes(styleSuffix.toLowerCase())
+        ? `${rewritten.prompt}, ${styleSuffix}.`
+        : rewritten.prompt;
+
     let imageUrl;
     try {
       const out = await generateFalImage({
         modelId: model.id,
-        prompt,
+        prompt: finalPrompt,
         width: proj.width,
         height: proj.height,
         referenceUrls,
@@ -621,6 +948,20 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       );
       await saveClient.query("COMMIT");
       savedFrameRow = upd.rows[0];
+      await emit(
+        pool,
+        projectId,
+        "frame.updated",
+        {
+          id: frameId,
+          fields: {
+            prompt: savedFrameRow.prompt,
+            result: savedFrameRow.result,
+            model: savedFrameRow.model,
+          },
+        },
+        { source: "user", actorId: req.user.id },
+      );
     } catch (e) {
       console.error(e);
       await saveClient.query("ROLLBACK").catch(() => {});
@@ -661,7 +1002,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     );
 
     const frameCheck = await pool.query(
-      `SELECT id, model, reference_urls, meta FROM frames WHERE id = $1 AND project_id = $2`,
+      `SELECT id, model, reference_urls, character_ids, meta FROM frames WHERE id = $1 AND project_id = $2`,
       [frameId, projectId],
     );
     if (frameCheck.rows.length === 0) {
@@ -678,9 +1019,28 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       return res.status(400).json({ error: "Unknown video model id" });
     }
 
-    const referenceUrls = Array.isArray(frameRow.reference_urls)
+    const manualVideoRefs = Array.isArray(frameRow.reference_urls)
       ? frameRow.reference_urls
       : [];
+    const projectCharactersForVideo = (
+      await pool.query(
+        `SELECT id, name, description, image_url FROM characters WHERE project_id = $1`,
+        [projectId],
+      )
+    ).rows;
+    const charactersOrdered = extractMentionedCharacters(prompt, projectCharactersForVideo);
+    // For video, the same @Name → Character{N} (Name) substitution applies,
+    // but most i2v models only consume the first reference as the start
+    // frame — so we leave reference_urls untouched here and only rewrite the
+    // prompt text. Character portraits stay confined to image generation.
+    const videoPrompt = charactersOrdered.length
+      ? applyCharacterPrompt({
+          prompt,
+          characters: charactersOrdered,
+          manualReferenceUrls: manualVideoRefs,
+        }).prompt
+      : prompt;
+    const referenceUrls = manualVideoRefs;
     if (referenceUrls.length < 1) {
       return res
         .status(400)
@@ -737,7 +1097,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     try {
       const out = await generateFalVideo({
         modelId: model.id,
-        prompt,
+        prompt: videoPrompt,
         durationSeconds,
         referenceUrls,
         width: proj.width,
@@ -785,6 +1145,21 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       }
       await saveClient.query("COMMIT");
       savedFrameRow = upd.rows[0];
+      await emit(
+        pool,
+        projectId,
+        "frame.updated",
+        {
+          id: frameId,
+          fields: {
+            prompt: savedFrameRow.prompt,
+            result: savedFrameRow.result,
+            model: savedFrameRow.model,
+            meta: savedFrameRow.meta,
+          },
+        },
+        { source: "user", actorId: req.user.id },
+      );
     } catch (e) {
       console.error(e);
       await saveClient.query("ROLLBACK").catch(() => {});
@@ -836,7 +1211,22 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
          FROM frames WHERE id = $1`,
         [newId],
       );
-      return res.status(201).json({ frame: full.rows[0] });
+      const orderR = await pool.query(
+        `SELECT frame_ids FROM projects WHERE id = $1`,
+        [projectId],
+      );
+      const ev = await emit(
+        pool,
+        projectId,
+        "frame.created",
+        { frame: full.rows[0], frame_ids: orderR.rows[0]?.frame_ids || [] },
+        {
+          source: "user",
+          actorId: req.user.id,
+          inverse: { kind: "frame.deleted", payload: { id: newId } },
+        },
+      );
+      return res.status(201).json({ frame: full.rows[0], eventSeq: Number(ev.id) });
     } catch (e) {
       await client.query("ROLLBACK");
       console.error(e);
@@ -857,6 +1247,18 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     }
     const client = await pool.connect();
     try {
+      // Snapshot before delete so undo can restore the frame's content.
+      const snapR = await pool.query(
+        `SELECT ${FRAME_COLUMNS} FROM frames WHERE id = $1 AND project_id = $2`,
+        [frameId, projectId],
+      );
+      const snapshot = snapR.rows[0] || null;
+      const orderBefore = (await pool.query(
+        `SELECT frame_ids FROM projects WHERE id = $1`,
+        [projectId],
+      )).rows[0]?.frame_ids || [];
+      const atIndex = orderBefore.indexOf(frameId);
+
       await client.query("BEGIN");
       await client.query(
         `UPDATE projects SET frame_ids = array_remove(frame_ids, $2::uuid)
@@ -871,6 +1273,20 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       if (del.rows.length === 0) {
         return res.status(404).json({ error: "Frame not found" });
       }
+      const orderAfter = orderBefore.filter((id) => id !== frameId);
+      await emit(
+        pool,
+        projectId,
+        "frame.deleted",
+        { id: frameId, frame_ids: orderAfter },
+        {
+          source: "user",
+          actorId: req.user.id,
+          inverse: snapshot
+            ? { kind: "frame.restore", payload: { snapshot, atIndex } }
+            : null,
+        },
+      );
       return res.status(204).end();
     } catch (e) {
       await client.query("ROLLBACK");

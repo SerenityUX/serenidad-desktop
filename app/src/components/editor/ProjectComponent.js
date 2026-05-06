@@ -8,6 +8,8 @@ import { VOICE_OPTIONS } from './stage/VoiceLineBar';
 import ShareModal from './ShareModal';
 import ProjectLoadingSkeleton from './ProjectLoadingSkeleton';
 import StoryboardView from './storyboard/StoryboardView';
+import ChatView from './chat/ChatView';
+import CharactersView from './characters/CharactersView';
 import { composeSceneToPng } from '../../lib/composeScene';
 import { encodeSegmentsToMp4 } from '../../lib/exportProject';
 import useVoicePrompt from '../../hooks/useVoicePrompt';
@@ -15,6 +17,14 @@ import platform from '../../platform';
 import useDocumentMeta from '../../hooks/useDocumentMeta';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import EditorOnboarding from '../onboarding/EditorOnboarding';
+import { subscribeProject } from '../../lib/realtime';
+import {
+  recordIncomingEvent,
+  popUndo,
+  popRedo,
+  applyInverse,
+} from '../../lib/actions';
 
 const DEFAULT_IMAGE_DURATION = 2;
 const DEFAULT_VIDEO_DURATION = 4;
@@ -33,6 +43,7 @@ const REMOTE_CAPTION_DEFAULT = {
 function remoteDetailToProjectData(projectRow, frames) {
   return {
     name: projectRow.name,
+    style: projectRow.style,
     scenes: (frames || []).map((f) => {
       const meta = f.meta && typeof f.meta === 'object' ? f.meta : {};
       const kind = meta.kind === 'video' ? 'video' : 'image';
@@ -46,6 +57,7 @@ function remoteDetailToProjectData(projectRow, frames) {
         thumbnail: f.result || '',
         positivePrompt: f.prompt || '',
         references: Array.isArray(f.reference_urls) ? f.reference_urls : [],
+        characterIds: Array.isArray(f.character_ids) ? f.character_ids : [],
         model: f.model || '',
         voiceline: meta.voiceline || '',
         speaker: meta.speaker || 'Narrator',
@@ -145,9 +157,11 @@ const ProjectAccessError = ({ error }) => {
 const ProjectComponent = ({ projectId }) => {
   // Cloud-only mode. The launcher bails before mount if no projectId.
   const isRemote = true;
+  const { user: currentUser } = useAuth();
 
   // Project data + selection
   const [projectData, setProjectData] = useState(null);
+  const [activeView, setActiveView] = useState('storyboard');
   /**
    * `null` while we haven't tried/are trying to load. Set to a structured
    * value when a load attempt definitively fails so the UI can show a
@@ -223,6 +237,13 @@ const ProjectComponent = ({ projectId }) => {
   const [references, setReferences] = useState([]);
   const [referencesUploading, setReferencesUploading] = useState(false);
 
+  // Characters: project-wide roster + per-scene bindings (ordered).
+  const [projectCharacters, setProjectCharacters] = useState([]);
+  const [boundCharacterIds, setBoundCharacterIds] = useState([]);
+  // When the chat asks to open a character (clicking a CharacterToolCard),
+  // we route via CharactersView. The id is consumed once and cleared.
+  const [openCharacterId, setOpenCharacterId] = useState(null);
+
   // Image selection (for cmd+c / cmd+v on the generated visual)
   const [imageSelected, setImageSelected] = useState(false);
 
@@ -296,6 +317,11 @@ const ProjectComponent = ({ projectId }) => {
     },
     [authToken, projectId],
   );
+
+  // Tracks undo/redo flight tags so we can route the realtime echo back to
+  // the right stack. Map<eventSeq, 'undo'|'redo'> — populated when CMD+Z
+  // fires the inverse, consumed when the corresponding event arrives.
+  const undoFlight = useRef(new Map());
 
   const refetchRemoteProject = useCallback(async () => {
     if (!authToken || !projectId) return null;
@@ -396,6 +422,27 @@ const ProjectComponent = ({ projectId }) => {
       cancelled = true;
     };
   }, [isRemote, projectId, authToken]);
+
+  // Project characters roster — used by the @mention popover and the
+  // CharactersSection chip rail. Refetched whenever the project changes.
+  const reloadProjectCharacters = useCallback(async () => {
+    if (!isRemote || !projectId || !authToken) return;
+    try {
+      const r = await fetch(
+        apiUrl(`/characters/projects/${encodeURIComponent(projectId)}/characters`),
+        { headers: { Authorization: `Bearer ${authToken}` } },
+      );
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      setProjectCharacters(Array.isArray(data.characters) ? data.characters : []);
+    } catch (e) {
+      console.warn('Failed to load characters:', e);
+    }
+  }, [isRemote, projectId, authToken]);
+
+  useEffect(() => {
+    reloadProjectCharacters();
+  }, [reloadProjectCharacters]);
 
   const copyImageToClipboard = useCallback(async (url) => {
     try {
@@ -585,12 +632,122 @@ const ProjectComponent = ({ projectId }) => {
   }, [isRemote, authToken, projectId, projectData, selectedScene, patchFrame, refetchRemoteProject, reorderFrames]);
 
   // ---------- Keyboard: scene navigation + image clipboard ops ----------
+  // Realtime: peers' edits and the agent's edits flow in here. We patch the
+  // local scenes array in-place for frame.updated (cheap), and refetch for
+  // structural changes (frame.created/deleted/reordered) since they touch
+  // ordering and selectedScene math. project.updated patches in place.
+  useEffect(() => {
+    if (!projectId || !authToken) return undefined;
+    const userId = currentUser?.id || null;
+    return subscribeProject(projectId, authToken, (event) => {
+      // Route this event to the right undo/redo stack.
+      const flight = undoFlight.current.get(event.seq);
+      if (flight) undoFlight.current.delete(event.seq);
+      recordIncomingEvent(projectId, userId, event, {
+        isLocalUndo: flight === 'undo',
+        isLocalRedo: flight === 'redo',
+      });
+
+      const { kind, payload } = event;
+      if (kind === 'frame.updated' && payload?.id && payload.fields) {
+        setProjectData((prev) => {
+          if (!prev) return prev;
+          const scenes = prev.scenes.map((s) => {
+            if (s.frameId !== payload.id) return s;
+            const next = { ...s };
+            const f = payload.fields;
+            if ('prompt' in f) next.positivePrompt = f.prompt || '';
+            if ('result' in f) next.thumbnail = f.result || '';
+            if ('model' in f) next.model = f.model || '';
+            if ('reference_urls' in f) {
+              next.references = Array.isArray(f.reference_urls) ? f.reference_urls : [];
+            }
+            if ('character_ids' in f) {
+              next.characterIds = Array.isArray(f.character_ids) ? f.character_ids : [];
+            }
+            if ('meta' in f && f.meta && typeof f.meta === 'object') {
+              const meta = f.meta;
+              if (meta.kind) next.kind = meta.kind === 'video' ? 'video' : 'image';
+              if (typeof meta.durationSeconds === 'number') next.durationSeconds = meta.durationSeconds;
+              if (typeof meta.voiceline === 'string') next.voiceline = meta.voiceline;
+              if (typeof meta.speaker === 'string') next.speaker = meta.speaker;
+              if (meta.captionSettings) next.captionSettings = { ...REMOTE_CAPTION_DEFAULT, ...meta.captionSettings };
+            }
+            return next;
+          });
+          return { ...prev, scenes };
+        });
+        return;
+      }
+      if (kind === 'project.updated' && payload?.fields) {
+        setProjectData((prev) => prev ? { ...prev, ...payload.fields } : prev);
+        return;
+      }
+      if (kind === 'frame.created' || kind === 'frame.deleted' || kind === 'frame.reordered') {
+        refetchRemoteProject().catch(() => {});
+        return;
+      }
+      if (kind === 'frame.restore') {
+        refetchRemoteProject().catch(() => {});
+      }
+    });
+  }, [projectId, authToken, currentUser?.id, refetchRemoteProject]);
+
+  // CMD+Z / CMD+Shift+Z. Undo applies the inverse via a fresh API call; the
+  // realtime echo updates UI for everyone (including us) and the actions
+  // module pushes/pops the right stacks.
+  const performUndo = useCallback(async () => {
+    if (!projectId || !authToken) return;
+    const ev = popUndo(projectId);
+    if (!ev || !ev.inverse) return;
+    try {
+      const res = await applyInverse({ projectId, inverse: ev.inverse, token: authToken });
+      // We don't have the seq of the resulting event yet — best-effort: tag
+      // the next inbound event for this projectId as `undo` by setting a
+      // sentinel '__nextInverse'. The realtime listener honors flight=undo
+      // for matching seqs only. Since we can't predict the seq, we use a
+      // simpler approach: tag based on the response's eventSeq when the
+      // server returns one.
+      if (res && typeof res.json === 'function') {
+        const json = await res.clone().json().catch(() => null);
+        const seq = json?.eventSeq;
+        if (typeof seq === 'number') undoFlight.current.set(seq, 'undo');
+      }
+    } catch (e) {
+      console.error('[undo] failed:', e);
+    }
+  }, [projectId, authToken]);
+
+  const performRedo = useCallback(async () => {
+    if (!projectId || !authToken) return;
+    const ev = popRedo(projectId);
+    if (!ev || !ev.inverse) return;
+    try {
+      const res = await applyInverse({ projectId, inverse: ev.inverse, token: authToken });
+      if (res && typeof res.json === 'function') {
+        const json = await res.clone().json().catch(() => null);
+        const seq = json?.eventSeq;
+        if (typeof seq === 'number') undoFlight.current.set(seq, 'redo');
+      }
+    } catch (e) {
+      console.error('[redo] failed:', e);
+    }
+  }, [projectId, authToken]);
+
   useEffect(() => {
     const handleKeyDown = (event) => {
       const activeElement = document.activeElement;
       const isInputFocused =
         activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA';
       const mod = event.metaKey || event.ctrlKey;
+
+      if (mod && (event.key === 'z' || event.key === 'Z')) {
+        if (isInputFocused) return; // let inputs handle their own undo
+        event.preventDefault();
+        if (event.shiftKey) performRedo();
+        else performUndo();
+        return;
+      }
 
       if (event.key === 'Escape' && imageSelected) {
         setImageSelected(false);
@@ -635,6 +792,9 @@ const ProjectComponent = ({ projectId }) => {
       }
 
       if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && !isInputFocused) {
+        // Storyboard mode owns its own ←/→ pager — don't also advance the
+        // timeline cursor underneath it.
+        if (showStoryboard) return;
         setVoiceText('');
         setMultiSelectedScenes([]);
         setPressedScene(selectedScene);
@@ -658,6 +818,9 @@ const ProjectComponent = ({ projectId }) => {
     pasteFromClipboardToReferences,
     duplicateAsEditFrame,
     multiSelectedScenes,
+    performUndo,
+    performRedo,
+    showStoryboard,
   ]);
 
   // Click anywhere outside the selected image clears the selection.
@@ -1155,6 +1318,9 @@ const ProjectComponent = ({ projectId }) => {
     setIsTransitioning(true);
     const id = setTimeout(() => {
       setReferences(Array.isArray(currentScene.references) ? currentScene.references : []);
+      setBoundCharacterIds(
+        Array.isArray(currentScene.characterIds) ? currentScene.characterIds : [],
+      );
       setSelectedFalModel(currentScene.model || defaultFalModelId);
       setVoiceText(currentScene.voiceline || '');
       setSpeakerWav(currentScene.speaker || 'Narrator');
@@ -1267,6 +1433,101 @@ const ProjectComponent = ({ projectId }) => {
     },
     [selectedScene],
   );
+
+  const updateSceneCharacterIds = useCallback(
+    (next) => {
+      setBoundCharacterIds(next);
+      setProjectData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          scenes: prev.scenes.map((s, i) =>
+            i === selectedScene - 1 ? { ...s, characterIds: next } : s,
+          ),
+        };
+      });
+    },
+    [selectedScene],
+  );
+
+  const handleBindCharacter = useCallback(
+    async (character) => {
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      if (!scene?.frameId || !authToken || !projectId || !character?.id) return;
+      // Optimistic update — the server is authoritative on order, but for an
+      // append-on-bind operation the client and server agree on the result.
+      const prev = Array.isArray(scene.characterIds) ? scene.characterIds : [];
+      if (prev.includes(character.id)) return;
+      const optimistic = [...prev, character.id];
+      updateSceneCharacterIds(optimistic);
+      try {
+        const res = await fetch(
+          apiUrl(
+            `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(scene.frameId)}/characters`,
+          ),
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify({ characterId: character.id }),
+          },
+        );
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Bind failed');
+        if (Array.isArray(body.frame?.character_ids)) {
+          updateSceneCharacterIds(body.frame.character_ids);
+        }
+      } catch (e) {
+        console.error(e);
+        updateSceneCharacterIds(prev);
+        window.alert(e.message || 'Could not add character');
+      }
+    },
+    [projectData, selectedScene, authToken, projectId, updateSceneCharacterIds],
+  );
+
+  const handleUnbindCharacter = useCallback(
+    async (character) => {
+      const scene = projectData?.scenes?.[selectedScene - 1];
+      if (!scene?.frameId || !authToken || !projectId || !character?.id) return;
+      const prev = Array.isArray(scene.characterIds) ? scene.characterIds : [];
+      const optimistic = prev.filter((id) => id !== character.id);
+      updateSceneCharacterIds(optimistic);
+      try {
+        const res = await fetch(
+          apiUrl(
+            `/projects/${encodeURIComponent(projectId)}/frames/${encodeURIComponent(scene.frameId)}/characters/${encodeURIComponent(character.id)}`,
+          ),
+          {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+              Accept: 'application/json',
+            },
+          },
+        );
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Unbind failed');
+        if (Array.isArray(body.frame?.character_ids)) {
+          updateSceneCharacterIds(body.frame.character_ids);
+        }
+      } catch (e) {
+        console.error(e);
+        updateSceneCharacterIds(prev);
+        window.alert(e.message || 'Could not remove character');
+      }
+    },
+    [projectData, selectedScene, authToken, projectId, updateSceneCharacterIds],
+  );
+
+  // The `@` popover used to also write to a per-frame bound-characters list,
+  // but the prompt's @-mentions are now the source of truth at generation
+  // time (see api/lib/mentions.js). Keep the prop as a no-op hook so other
+  // signals (telemetry, onboarding nudges) can still attach later.
+  const handleMentionCharacter = useCallback(() => {}, []);
 
   const handleAddReferenceFiles = useCallback(
     async (files) => {
@@ -1425,77 +1686,36 @@ const ProjectComponent = ({ projectId }) => {
     [captionSettings.caption, updateCaptionSettings],
   );
 
-  const handleVoiceUpdate = useCallback(
-    ({ voiceline, prompt: newPrompt, speaker, editorResponse }) => {
-      const nextSpeaker =
-        speaker && VOICE_OPTIONS.includes(speaker) ? speaker : null;
-      const effectiveSpeaker = nextSpeaker || speakerWav;
-      if (nextSpeaker) {
-        setSpeakerWav(nextSpeaker);
+  const [chatRefreshKey, setChatRefreshKey] = useState(0);
+  const handleVoiceChatActivity = useCallback((event, data) => {
+    if (event === 'tool_call' && data?.name) {
+      const mutating = new Set([
+        'add_scene',
+        'delete_scene',
+        'edit_scene_prompt',
+        'set_scene_model',
+        'add_reference_to_scene',
+        'set_project_style',
+      ]);
+      if (mutating.has(data.name) && !(data.result && data.result.error)) {
+        refetchRemoteProject().catch(() => {});
       }
-      const trimmedPrompt = String(newPrompt || '').trim();
-      const frameId = projectData?.scenes?.[selectedScene - 1]?.frameId;
-      const currentPrompt =
-        projectData?.scenes?.[selectedScene - 1]?.positivePrompt || '';
-      if (trimmedPrompt && trimmedPrompt !== currentPrompt && frameId) {
-        setProjectData((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            scenes: prev.scenes.map((s) =>
-              s.frameId === frameId ? { ...s, positivePrompt: trimmedPrompt } : s,
-            ),
-          };
-        });
-        persistScenePromptToApi(frameId, trimmedPrompt);
-      }
-      if (typeof voiceline === 'string') {
-        const trimmedVoiceline = voiceline.trim();
-        setVoiceText(trimmedVoiceline);
-        updateSceneVoiceline(trimmedVoiceline, effectiveSpeaker);
-        if (trimmedVoiceline) {
-          applyVoicelineToCaptionIfEmpty(trimmedVoiceline);
-        }
-      } else if (nextSpeaker) {
-        updateSceneVoiceline(voiceText, effectiveSpeaker);
-      }
-      if (editorResponse) {
-        console.log('[voice] editor:', editorResponse);
-      }
-    },
-    [
-      selectedScene,
-      projectData,
-      voiceText,
-      persistScenePromptToApi,
-      updateSceneVoiceline,
-      speakerWav,
-      applyVoicelineToCaptionIfEmpty,
-    ],
-  );
+    } else if (event === 'done') {
+      setChatRefreshKey((k) => k + 1);
+    }
+  }, [refetchRemoteProject]);
 
   const voice = useVoicePrompt({
-    onUpdate: handleVoiceUpdate,
     getAuthToken: () => authToken,
-    getCurrentPrompt: () =>
-      projectData?.scenes?.[selectedScene - 1]?.positivePrompt || '',
-    getCurrentVoiceline: () => voiceText,
-    getCurrentSpeaker: () => speakerWav,
-    getAvailableSpeakers: () => VOICE_OPTIONS,
-    getModelId: () => selectedFalModel,
-    getReferences: () =>
-      (references || [])
-        .map((r) => (typeof r === 'string' ? r : r?.url))
-        .filter(Boolean),
-    getContext: () => {
-      if (!projectData?.scenes?.length) return '';
-      const lines = projectData.scenes.slice(0, 50).map((s, i) => {
-        const p = String(s.positivePrompt || '').trim().slice(0, 240);
-        const marker = i + 1 === selectedScene ? ' ← currently editing' : '';
-        return `Scene ${i + 1}${marker}: ${p || '(empty)'}`;
-      });
-      return `Project: ${projectData.name || 'untitled'} (${projectData.scenes.length} scenes)\n${lines.join('\n')}`;
+    getProjectId: () => projectId,
+    getFrameContextRef: () => {
+      if (activeView === 'storyboard') return null;
+      if (!projectData?.scenes?.length) return null;
+      const idx = selectedScene;
+      if (!Number.isInteger(idx) || idx < 1) return null;
+      return { type: 'frame', sceneIndex: idx, label: `Scene ${idx}` };
     },
+    onChatActivity: handleVoiceChatActivity,
   });
 
   const handleFalModelChange = (event) => {
@@ -1869,7 +2089,13 @@ const ProjectComponent = ({ projectId }) => {
       showShare={isRemote && Boolean(authToken)}
       voice={voice}
       projectName={projectData?.name}
+      view={activeView}
+      onViewChange={setActiveView}
       leftSidebarProps={{
+        projectId,
+        projectStyle: projectData?.style || 'Ghibli/Miyazaki',
+        onProjectStyleChange: (next) =>
+          setProjectData((prev) => (prev ? { ...prev, style: next } : prev)),
         falModels: isVideoFrame ? falVideoModels : falModels,
         selectedFalModel,
         onFalModelChange: handleFalModelChange,
@@ -1886,8 +2112,7 @@ const ProjectComponent = ({ projectId }) => {
           ? true
           : (falModels.find((m) => m.id === selectedFalModel)?.supportsReferences ?? true),
         videoMode: isVideoFrame,
-        sceneDuration,
-        onSceneDurationChange: handleSceneDurationChange,
+        hasGenerated: Boolean(currentScene?.thumbnail),
         generateLabel: isVideoFrame
           ? (isCurrentCreatingVideo ? 'Creating Video…' : 'Create Video')
           : (generateImageText[currentFrameId] || 'Generate Visuals'),
@@ -1900,6 +2125,11 @@ const ProjectComponent = ({ projectId }) => {
         showMakeVideoFromCurrent: !isVideoFrame && Boolean(currentScene?.thumbnail),
         onMakeVideoFromCurrent: makeVideoFrameFromCurrent,
         makeVideoFromCurrentDisabled: !currentScene?.thumbnail,
+        projectCharacters,
+        boundCharacterIds,
+        onBindCharacter: handleBindCharacter,
+        onUnbindCharacter: handleUnbindCharacter,
+        onMentionCharacter: handleMentionCharacter,
       }}
       centerStageProps={{
         aspectRatio: projectAspectRatio,
@@ -1933,6 +2163,7 @@ const ProjectComponent = ({ projectId }) => {
           promptFocusToken,
           isPlaying,
           onVideoEnded: advancePlayback,
+          characters: projectCharacters,
         },
         voiceLineProps: {
           voiceText,
@@ -1959,6 +2190,11 @@ const ProjectComponent = ({ projectId }) => {
           captionSettings,
           onStrokeSizeChange: handleStrokeSizeChange,
           onStrokeColorChange: handleStrokeColorChange,
+        },
+        durationProps: {
+          videoMode: isVideoFrame,
+          sceneDuration,
+          onSceneDurationChange: handleSceneDurationChange,
         },
         exportProps: {
           canExport: canExportClip,
@@ -2024,6 +2260,62 @@ const ProjectComponent = ({ projectId }) => {
         onAddSceneMouseLeave: () => setPressedAddScene(false),
       }}
     />
+    {activeView === 'chat' ? (
+      <div
+        style={{
+          position: 'absolute',
+          top: 45,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 60,
+          backgroundColor: '#fff',
+        }}
+      >
+        <ChatView
+          projectId={projectId}
+          refreshKey={chatRefreshKey}
+          onStoryboardChanged={() => {
+            refetchRemoteProject().catch(() => {});
+            reloadProjectCharacters();
+          }}
+          onToolNavigate={(nav) => {
+            if (!nav) return;
+            if (nav.tab === 'storyboard') {
+              setActiveView('storyboard');
+              if (Number.isInteger(nav.sceneIndex) && nav.sceneIndex >= 1) {
+                setSelectedScene(nav.sceneIndex);
+              }
+            } else if (nav.tab === 'characters') {
+              if (nav.characterId) setOpenCharacterId(nav.characterId);
+              setActiveView('characters');
+            } else if (nav.tab === 'chat') {
+              setActiveView('chat');
+            }
+          }}
+        />
+      </div>
+    ) : null}
+    {activeView === 'characters' ? (
+      <div
+        style={{
+          position: 'absolute',
+          top: 45,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 60,
+          backgroundColor: '#FAFAFA',
+        }}
+      >
+        <CharactersView
+          projectId={projectId}
+          onChange={reloadProjectCharacters}
+          openCharacterId={openCharacterId}
+          onOpenHandled={() => setOpenCharacterId(null)}
+        />
+      </div>
+    ) : null}
     {showStoryboard ? (
       <div
         style={{
@@ -2102,6 +2394,7 @@ const ProjectComponent = ({ projectId }) => {
         </div>
       </div>
     ) : null}
+    <EditorOnboarding />
     </>
   );
 };

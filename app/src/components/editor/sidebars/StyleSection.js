@@ -1,49 +1,93 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import SectionHeader from '../shared/SectionHeader';
 import FieldLabel from '../shared/FieldLabel';
 import { asset } from '../../../lib/asset';
+import { space } from '../../../lib/tokens';
+import { apiUrl } from '../../../config';
+import { useAuth } from '../../../context/AuthContext';
 
-const selectStyle = {
-  width: 'calc(100% - 24px)',
-  marginLeft: 12,
-  appearance: 'none',
-  marginRight: 12,
-  padding: '4px 4px',
-  border: '1px solid #D9D9D9',
-  borderRadius: '4px',
-  backgroundColor: '#fff',
-  fontSize: '14px',
-  color: '#404040',
-};
-
-const helperStyle = {
-  marginLeft: 12,
-  marginRight: 12,
-  marginTop: 4,
-  fontSize: 11,
-  color: '#808080',
-};
-
+/**
+ * Single sidebar group for everything style-related: project visual style
+ * (appended to all generation prompts) and the per-frame model. Combined
+ * here so the sidebar doesn't have a redundant second "Style" header.
+ */
 const StyleSection = ({
   falModels,
   selectedFalModel,
   onFalModelChange,
+  projectId,
+  projectStyle,
+  onProjectStyleChange,
 }) => {
+  const { token } = useAuth();
+  const [styleOptions, setStyleOptions] = useState([]);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch(apiUrl('/projects/styles'), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d?.styles)) setStyleOptions(d.styles);
+      })
+      .catch(() => {});
+  }, [token]);
+
+  const handleStyleChange = async (e) => {
+    const next = e.target.value;
+    onProjectStyleChange?.(next);
+    if (!token || !projectId) return;
+    try {
+      await fetch(apiUrl(`/projects/${encodeURIComponent(projectId)}`), {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ style: next }),
+      });
+    } catch {
+      // Silent — local state remains; next gen falls back to server value.
+    }
+  };
+
+  const labels = new Set(styleOptions.map((s) => s.label));
+  const mergedStyles =
+    !projectStyle || labels.has(projectStyle)
+      ? styleOptions
+      : [{ id: 'custom', label: projectStyle }, ...styleOptions];
+
   const showFal = Array.isArray(falModels) && falModels.length > 0;
-  const activeFalModel =
-    showFal && falModels.find((m) => m.id === selectedFalModel);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
       <SectionHeader icon={asset('icons/Picture.svg')} label="Style" />
 
+      {projectId ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: space[1] }}>
+          <FieldLabel>Visual style</FieldLabel>
+          <select
+            value={projectStyle || ''}
+            onChange={handleStyleChange}
+            style={{ width: '100%' }}
+          >
+            {mergedStyles.map((s) => (
+              <option key={s.id} value={s.label}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
       {showFal && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
-          <FieldLabel>MODEL</FieldLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: space[1] }}>
+          <FieldLabel>Model</FieldLabel>
           <select
             value={selectedFalModel || ''}
             onChange={onFalModelChange}
-            style={selectStyle}
+            style={{ width: '100%' }}
           >
             {falModels.map((m) => (
               <option key={m.id} value={m.id}>
@@ -51,26 +95,6 @@ const StyleSection = ({
               </option>
             ))}
           </select>
-          {(() => {
-            if (!activeFalModel) return null;
-            const isVideoModel = Object.prototype.hasOwnProperty.call(
-              activeFalModel,
-              'supportsEndFrame',
-            );
-            let msg = null;
-            if (isVideoModel) {
-              if (activeFalModel.supportsEndFrame) {
-                msg = 'Start + end frame — prompt guides the motion between them';
-              } else if (!activeFalModel.acceptsMultipleReferences) {
-                msg = 'Start frame only — extra refs will be ignored';
-              }
-            } else {
-              msg = activeFalModel.supportsReferences
-                ? 'Supports references'
-                : 'Ignores references';
-            }
-            return msg ? <div style={helperStyle}>{msg}</div> : null;
-          })()}
         </div>
       )}
     </div>

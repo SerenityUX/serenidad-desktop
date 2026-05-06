@@ -2,25 +2,9 @@ import React from 'react';
 import SectionHeader from '../shared/SectionHeader';
 import ColorPickerField from './ColorPickerField';
 import { asset } from '../../../lib/asset';
+import { space } from '../../../lib/tokens';
 
-const rowStyle = { display: 'flex', flexDirection: 'row', gap: 8, marginLeft: 12, marginRight: 12 };
-
-const selectStyle = {
-  width: '50%',
-  borderRadius: '4px',
-  appearance: 'none',
-  border: '1px solid #D9D9D9',
-  padding: '4px',
-  fontSize: 14,
-};
-
-const numberInputStyle = {
-  width: '50%',
-  borderRadius: '4px',
-  border: '1px solid #D9D9D9',
-  padding: '4px',
-  fontSize: 14,
-};
+const rowStyle = { display: 'flex', flexDirection: 'row', gap: space[2] };
 
 const CaptionSection = ({
   captionSettings,
@@ -34,20 +18,24 @@ const CaptionSection = ({
   onCaptionChange,
   onCaptionBlur,
 }) => (
-  <>
+  <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
     <SectionHeader icon={asset('icons/caption.svg')} label="Caption" />
 
     <div style={rowStyle}>
       <select
         value={captionSettings.selectedFont}
         onChange={onFontChange}
-        style={selectStyle}
+        style={{ width: '50%' }}
       >
-        {availableFonts.map((font) => (
-          <option key={font.name} value={font.name}>{font.name}</option>
+        {availableFonts.map((f) => (
+          <option key={f.name} value={f.name}>{f.name}</option>
         ))}
       </select>
-      <select value={captionSettings.selectedWeight} onChange={onWeightChange} style={selectStyle}>
+      <select
+        value={captionSettings.selectedWeight}
+        onChange={onWeightChange}
+        style={{ width: '50%' }}
+      >
         {availableWeights.map((w) => (
           <option key={w.value} value={w.value}>{w.label}</option>
         ))}
@@ -61,7 +49,7 @@ const CaptionSection = ({
         onChange={onFontSizeChange}
         min="1"
         max="99"
-        style={numberInputStyle}
+        style={{ width: '50%' }}
       />
       <ColorPickerField color={captionSettings.captionColor} onChange={onColorChange} />
     </div>
@@ -70,24 +58,14 @@ const CaptionSection = ({
       value={localCaption}
       onChange={onCaptionChange}
       onBlur={onCaptionBlur}
-      placeholder="Caption for this scene..."
+      placeholder="Caption for this scene…"
       style={{
-        width: 'calc(100% - 32px)',
-        marginLeft: 12,
-        marginRight: 12,
+        width: '100%',
         fontFamily: captionSettings.selectedFont,
-        resize: 'none',
-        padding: '4px 4px',
-        border: '1px solid #D9D9D9',
-        borderRadius: '4px',
-        backgroundColor: '#fff',
-        fontSize: '14px',
-        color: '#404040',
-        height: '60px',
-        overflowY: 'auto',
+        height: 64,
       }}
     />
-  </>
+  </div>
 );
 
 export default CaptionSection;

@@ -132,15 +132,20 @@ module.exports = function createAuthRouter(pool, requireAuth) {
 
     try {
       const found = await pool.query(
-        `SELECT id FROM users WHERE email = $1`,
+        `SELECT id FROM users WHERE email = $1 AND pending_signup = FALSE`,
         [email],
       );
+      // Don't reveal whether the email exists — return ok either way and
+      // only send a code if it does. Prevents account enumeration.
       if (found.rows.length === 0) {
-        return res.status(404).json({ error: "No account for this email" });
+        return res.json({ ok: true });
       }
 
       await pool.query(
-        `UPDATE users SET otp = $2, otp_expires_at = $3, token = NULL WHERE id = $1`,
+        `UPDATE users
+         SET otp = $2, otp_expires_at = $3, token = NULL,
+             otp_attempts = 0, otp_locked_until = NULL
+         WHERE id = $1`,
         [found.rows[0].id, otpHash, expires],
       );
 
@@ -148,7 +153,7 @@ module.exports = function createAuthRouter(pool, requireAuth) {
         await sendOtpEmail(email, otp);
       } catch (e) {
         console.error("Resend:", e.message);
-        return res.status(502).json({ error: "Could not send email" });
+        // Still return ok so timing/error doesn't leak account existence.
       }
 
       return res.json({ ok: true });
@@ -173,39 +178,82 @@ module.exports = function createAuthRouter(pool, requireAuth) {
       return res.status(500).json({ error: "Server misconfigured" });
     }
 
+    const MAX_OTP_ATTEMPTS = 5;
+    const LOCKOUT_MS = 15 * 60 * 1000;
+
     try {
       const r = await pool.query(
-        `SELECT id, name, email, profile_picture, otp, otp_expires_at, created_at, tokens, role
+        `SELECT id, name, email, profile_picture, otp, otp_expires_at, created_at, tokens, role,
+                otp_attempts, otp_locked_until, pending_signup
          FROM users WHERE email = $1`,
         [email],
       );
-      if (r.rows.length === 0) {
-        return res.status(404).json({ error: "Not found" });
-      }
+      // Use a generic error so /verify-otp can't be used for account enumeration.
+      const generic = () => res.status(401).json({ error: "Invalid code" });
+      if (r.rows.length === 0) return generic();
       const row = r.rows[0];
-      if (!row.otp || !row.otp_expires_at) {
-        return res.status(400).json({ error: "No pending code" });
+      if (row.otp_locked_until && new Date(row.otp_locked_until) > new Date()) {
+        return res
+          .status(429)
+          .json({ error: "Too many attempts — try again later" });
       }
-      if (new Date(row.otp_expires_at) < new Date()) {
-        return res.status(400).json({ error: "Code expired" });
-      }
+      if (!row.otp || !row.otp_expires_at) return generic();
+      if (new Date(row.otp_expires_at) < new Date()) return generic();
 
       const stored = Buffer.from(String(row.otp), "hex");
       const expected = Buffer.from(expectedHashHex, "hex");
-      if (
-        stored.length !== expected.length ||
-        !crypto.timingSafeEqual(stored, expected)
-      ) {
-        return res.status(401).json({ error: "Invalid code" });
+      const ok =
+        stored.length === expected.length &&
+        crypto.timingSafeEqual(stored, expected);
+
+      if (!ok) {
+        const nextAttempts = (row.otp_attempts || 0) + 1;
+        if (nextAttempts >= MAX_OTP_ATTEMPTS) {
+          // Lock the account *and* invalidate the OTP so a fresh code is
+          // required even after the lockout window.
+          await pool.query(
+            `UPDATE users
+             SET otp = NULL, otp_expires_at = NULL,
+                 otp_attempts = 0,
+                 otp_locked_until = $2
+             WHERE id = $1`,
+            [row.id, new Date(Date.now() + LOCKOUT_MS)],
+          );
+          return res
+            .status(429)
+            .json({ error: "Too many attempts — try again later" });
+        }
+        await pool.query(
+          `UPDATE users SET otp_attempts = $2 WHERE id = $1`,
+          [row.id, nextAttempts],
+        );
+        return generic();
       }
 
       const token = generateSessionToken();
       await pool.query(
         `UPDATE users
-         SET token = $2, otp = NULL, otp_expires_at = NULL, pending_signup = FALSE
+         SET token = $2, otp = NULL, otp_expires_at = NULL,
+             otp_attempts = 0, otp_locked_until = NULL,
+             pending_signup = FALSE
          WHERE id = $1`,
         [row.id, token],
       );
+
+      let tokensBalance = row.tokens ?? 0;
+      // Welcome grant: $1 worth of tokens (100) on first successful verify.
+      if (row.pending_signup) {
+        try {
+          await pool.query(
+            `INSERT INTO transactions (user_id, delta, name, notes)
+             VALUES ($1, $2, $3, $4)`,
+            [row.id, 100, "Welcome credit", "Free $1 to get started"],
+          );
+          tokensBalance = (tokensBalance || 0) + 100;
+        } catch (grantErr) {
+          console.error("welcome grant failed:", grantErr);
+        }
+      }
 
       return res.json({
         token,
@@ -215,7 +263,7 @@ module.exports = function createAuthRouter(pool, requireAuth) {
           email: row.email,
           profile_picture: row.profile_picture,
           created_at: row.created_at,
-          tokens: row.tokens ?? 0,
+          tokens: tokensBalance,
           role: row.role || "user",
         },
       });

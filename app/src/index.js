@@ -10,6 +10,7 @@ import {
 } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./context/AuthContext";
+import { OnboardingProvider } from "./context/OnboardingContext";
 import ProjectComponent from "./components/editor/ProjectComponent";
 import platform, { isElectron } from "./platform";
 import DownloadAppBanner from "./components/DownloadAppBanner";
@@ -89,6 +90,7 @@ const Router = isElectron ? HashRouter : BrowserRouter;
 const Root = () => (
   <Router>
     <AuthProvider>
+      <OnboardingProvider>
       <UpdateGate>
       <div
         style={{
@@ -136,6 +138,7 @@ const Root = () => (
         </div>
       </div>
       </UpdateGate>
+      </OnboardingProvider>
     </AuthProvider>
   </Router>
 );

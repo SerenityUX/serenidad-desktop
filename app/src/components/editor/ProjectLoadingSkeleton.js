@@ -1,5 +1,6 @@
 import React from 'react';
 import TitleBar from './TitleBar';
+import Skeleton from '../ui/Skeleton';
 
 const ProjectLoadingSkeleton = () => (
   <div
@@ -10,16 +11,18 @@ const ProjectLoadingSkeleton = () => (
       flexDirection: 'column',
       background: '#FFFFFF',
     }}
+    aria-busy="true"
+    aria-label="Loading project"
   >
     <TitleBar showExport={false} showShare={false} />
 
     <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-      <div style={{ width: 274, background: '#FAFAFA' }} />
-      <div style={{ flex: 1, background: '#F2F2F2' }} />
-      <div style={{ width: 274, background: '#FAFAFA' }} />
+      <Skeleton width={274} height="100%" radius={0} style={{ flexShrink: 0 }} />
+      <Skeleton width="auto" height="100%" radius={0} style={{ flex: 1 }} />
+      <Skeleton width={274} height="100%" radius={0} style={{ flexShrink: 0 }} />
     </div>
 
-    <div style={{ height: 175, background: '#404040' }} />
+    <Skeleton width="100%" height={175} radius={0} />
   </div>
 );
 

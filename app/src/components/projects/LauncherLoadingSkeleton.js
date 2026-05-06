@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import ProfileAvatarMenu from '../ProfileAvatarMenu';
 import TokensPill from '../TokensPill';
 import TokensModal from '../TokensModal';
+import Skeleton from '../ui/Skeleton';
 import { useAuth } from '../../context/AuthContext';
 
 const HEADER_RAIL_WIDTH_PX = 140;
@@ -62,15 +63,7 @@ const LauncherLoadingSkeleton = () => {
         }}
       >
         {[0, 1, 2].map((i) => (
-          <div key={i}>
-            <div
-              style={{
-                width: '100%',
-                aspectRatio: '16 / 9',
-                backgroundColor: '#F2F2F2',
-              }}
-            />
-          </div>
+          <Skeleton key={i} width="100%" height="auto" radius={0} style={{ aspectRatio: '16 / 9' }} />
         ))}
       </div>
 

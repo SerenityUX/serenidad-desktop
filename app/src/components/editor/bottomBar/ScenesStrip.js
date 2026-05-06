@@ -14,86 +14,99 @@ const dropIndicatorStyle = {
 };
 
 /**
- * Storyboard toggle. Mirrors PlayPauseButton's flush-corner styling so the
- * two cap the strip on opposite sides — same #404040 fill, same #fff border
- * pair on bottom + the strip-facing edge.
+ * Floating icon button used for the strip's two corner controls. Sits on
+ * the dark filmstrip surface, so backgrounds use translucent white tints
+ * (same idle/hover/active treatment Obsidian uses on its dark panes) and
+ * the icon is rendered at full white. No flush-to-edge corners, no harsh
+ * 1px white dividers — the strip's own backdrop carries the boundary.
  */
+const StripIconButton = ({
+  position,
+  active,
+  disabled,
+  onClick,
+  ariaLabel,
+  ariaPressed,
+  children,
+}) => {
+  const [hover, setHover] = useState(false);
+  const bg = disabled
+    ? 'transparent'
+    : active
+      ? '#1F93FF'
+      : hover
+        ? 'rgba(255, 255, 255, 0.14)'
+        : 'rgba(255, 255, 255, 0.08)';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      aria-pressed={ariaPressed}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        position: 'absolute',
+        top: 8,
+        ...position,
+        width: 28,
+        height: 28,
+        borderRadius: 6,
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        backgroundColor: bg,
+        color: '#fff',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 0,
+        zIndex: 10,
+        opacity: disabled ? 0.4 : 1,
+        transition: 'background-color 120ms ease, border-color 120ms ease',
+      }}
+    >
+      {children}
+    </button>
+  );
+};
+
 const StoryboardButton = ({ active, onClick }) => (
-  <button
-    type="button"
+  <StripIconButton
+    position={{ right: 8 }}
+    active={active}
     onClick={onClick}
-    aria-label={active ? 'Close storyboard' : 'Open storyboard'}
-    aria-pressed={!!active}
-    style={{
-      position: 'absolute',
-      top: 0,
-      right: 0,
-      width: 28,
-      height: 28,
-      borderRadius: 0,
-      borderTop: 0,
-      borderRight: 0,
-      borderLeft: '1px solid #fff',
-      borderBottom: '1px solid #fff',
-      backgroundColor: active ? '#1F1F1F' : '#404040',
-      color: '#fff',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: 0,
-      zIndex: 10,
-    }}
+    ariaLabel={active ? 'Close storyboard' : 'Open storyboard'}
+    ariaPressed={!!active}
   >
-    {/* 2×2 grid of small squares — a storyboard sheet at a glance. */}
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <rect x="1" y="1" width="5" height="4" stroke="#fff" strokeWidth="1.2" />
-      <rect x="8" y="1" width="5" height="4" stroke="#fff" strokeWidth="1.2" />
-      <rect x="1" y="8" width="5" height="4" stroke="#fff" strokeWidth="1.2" />
-      <rect x="8" y="8" width="5" height="4" stroke="#fff" strokeWidth="1.2" />
+    {/* 2×2 grid — a storyboard sheet at a glance. */}
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+      <rect x="1" y="1" width="5" height="4" stroke="currentColor" strokeWidth="1.2" />
+      <rect x="8" y="1" width="5" height="4" stroke="currentColor" strokeWidth="1.2" />
+      <rect x="1" y="8" width="5" height="4" stroke="currentColor" strokeWidth="1.2" />
+      <rect x="8" y="8" width="5" height="4" stroke="currentColor" strokeWidth="1.2" />
     </svg>
-  </button>
+  </StripIconButton>
 );
 
 const PlayPauseButton = ({ isPlaying, onClick, disabled }) => (
-  <button
-    type="button"
+  <StripIconButton
+    position={{ left: 8 }}
     onClick={onClick}
     disabled={disabled}
-    aria-label={isPlaying ? 'Pause' : 'Play'}
-    style={{
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width: 28,
-      height: 28,
-      borderRadius: 0,
-      borderTop: 0,
-      borderLeft: 0,
-      borderRight: '1px solid #fff',
-      borderBottom: '1px solid #fff',
-      backgroundColor: '#404040',
-      color: '#fff',
-      cursor: disabled ? 'not-allowed' : 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: 0,
-      zIndex: 10,
-      opacity: disabled ? 0.4 : 1,
-    }}
+    ariaLabel={isPlaying ? 'Pause' : 'Play'}
   >
     {isPlaying ? (
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="#fff">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden>
         <rect x="2" y="1.5" width="3" height="9" rx="0.5" />
         <rect x="7" y="1.5" width="3" height="9" rx="0.5" />
       </svg>
     ) : (
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="#fff">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden>
         <path d="M3 1.8 L3 10.2 L10 6 Z" />
       </svg>
     )}
-  </button>
+  </StripIconButton>
 );
 
 const ScenesStrip = ({
@@ -274,16 +287,15 @@ const ScenesStrip = ({
             top: -18,
             left: buttonLeft,
             transform: 'translateX(-50%)',
-            backgroundColor: '#0A84FF',
+            backgroundColor: '#1F93FF',
             color: '#fff',
-            border: 0,
+            border: '1px solid rgba(255,255,255,0.18)',
             borderRadius: 999,
             padding: '8px 16px',
             fontSize: 13,
             fontWeight: 600,
             cursor: 'pointer',
             zIndex: 5,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
             whiteSpace: 'nowrap',
           }}
         >

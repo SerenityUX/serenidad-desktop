@@ -31,34 +31,199 @@
     <meta name="twitter:description" content="Storyboard and direct anime shorts, scene by scene." />
     <meta name="twitter:image" content="/favicon.png" />
     <style>
-      textarea::placeholder { color: #BFBFBF; }
-      input::placeholder { color: #BFBFBF; }
+      /* Design tokens. Mirrors src/lib/tokens.js so stylesheets and
+         inline styles stay in sync. */
+      :root {
+        --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+        --color-bg: #ffffff;
+        --color-bg-subtle: #f6f8fa;
+        --color-bg-muted: #eef1f4;
+        --color-bg-hover: rgba(0, 0, 0, 0.04);
+        --color-bg-active: rgba(0, 0, 0, 0.06);
+        --color-bg-accent-subtle: rgba(31, 147, 255, 0.10);
+
+        --color-text: #1f2328;
+        --color-text-muted: #656d76;
+        --color-text-faint: #8b949e;
+        --color-text-accent: #1F93FF;
+        --color-text-danger: #cf222e;
+
+        --color-border: rgba(0, 0, 0, 0.08);
+        --color-border-strong: rgba(0, 0, 0, 0.14);
+        --color-border-focus: #1F93FF;
+
+        --color-accent: #1F93FF;
+        --color-accent-hover: #1880e0;
+        --color-accent-active: #1370c9;
+
+        --color-overlay: rgba(15, 17, 21, 0.45);
+
+        --radius-sm: 4px;
+        --radius-md: 6px;
+        --radius-lg: 8px;
+        --radius-xl: 12px;
+
+        --transition-fast: 120ms ease;
+        --transition-base: 180ms ease;
+      }
+
+      html, body {
+        font-family: var(--font-stack);
+        color: var(--color-text);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+      }
+
+      /* Modern, quiet form defaults. Subtle borders, focus ring uses border
+         color change + a thin outline (an outline is not a dropshadow). */
+      textarea, input, select {
+        font-family: inherit;
+        font-size: 13px;
+        color: var(--color-text);
+        background-color: var(--color-bg);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 6px 10px;
+        outline: none;
+        transition: border-color var(--transition-fast),
+                    background-color var(--transition-fast);
+        box-sizing: border-box;
+      }
       textarea {
-        color: #404040;
-        border: 1px solid #D9D9D9;
-        border-radius: 8px;
-        padding: 6px 8px;
         resize: none;
-        height: 60px;
+        line-height: 1.45;
       }
-      input {
-        color: #404040;
-        border: 1px solid #D9D9D9;
-        border-radius: 8px;
-        padding: 6px 8px;
-        resize: none;
+      textarea::placeholder, input::placeholder {
+        color: var(--color-text-faint);
       }
-      .labelTop {
-        margin: 0;
-        color: #404040;
-        font-size: 6px;
-        font-weight: 800;
+      textarea:hover, input:hover, select:hover {
+        border-color: var(--color-border-strong);
       }
-      textarea:focus, input:focus {
-        border-color: #D9D9D9;
-        box-shadow: none;
+      textarea:focus, input:focus, select:focus {
+        border-color: var(--color-border-focus);
+        outline: 2px solid var(--color-bg-accent-subtle);
+        outline-offset: 0;
       }
-      button { cursor: pointer; }
+      textarea:disabled, input:disabled, select:disabled {
+        background-color: var(--color-bg-subtle);
+        color: var(--color-text-muted);
+        cursor: not-allowed;
+      }
+
+      select {
+        appearance: none;
+        -webkit-appearance: none;
+        /* Chevron-down glyph (matches public/icons/chevron-down.svg). Inline
+           SVG encoded as a data URL — stroke is hard-coded to the muted
+           token because data URLs can't read CSS variables. */
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'><path d='M3 4.5L6 7.5L9 4.5' stroke='%23656d76' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-position: right 8px center;
+        background-repeat: no-repeat;
+        background-size: 12px 12px;
+        padding-right: 28px;
+      }
+      select:hover { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'><path d='M3 4.5L6 7.5L9 4.5' stroke='%231f2328' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>"); }
+
+      /* Buttons. Quiet by default; variants are additive. */
+      button { cursor: pointer; font-family: inherit; }
+      button:disabled { cursor: not-allowed; }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 12px;
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border-strong);
+        background-color: var(--color-bg);
+        color: var(--color-text);
+        transition: background-color var(--transition-fast),
+                    border-color var(--transition-fast),
+                    color var(--transition-fast);
+        white-space: nowrap;
+        user-select: none;
+      }
+      .btn:hover { background-color: var(--color-bg-subtle); }
+      .btn:active { background-color: var(--color-bg-muted); }
+      .btn:focus-visible {
+        outline: 2px solid var(--color-bg-accent-subtle);
+        border-color: var(--color-border-focus);
+      }
+      .btn:disabled { opacity: 0.55; }
+      .btn:disabled:hover { background-color: var(--color-bg); }
+
+      .btn-primary {
+        background-color: var(--color-accent);
+        border-color: var(--color-accent);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background-color: var(--color-accent-hover);
+        border-color: var(--color-accent-hover);
+      }
+      .btn-primary:active {
+        background-color: var(--color-accent-active);
+        border-color: var(--color-accent-active);
+      }
+      .btn-primary:disabled:hover {
+        background-color: var(--color-accent);
+        border-color: var(--color-accent);
+      }
+
+      .btn-ghost {
+        border-color: transparent;
+        background-color: transparent;
+      }
+      .btn-ghost:hover {
+        background-color: var(--color-bg-hover);
+        border-color: transparent;
+      }
+      .btn-ghost:active {
+        background-color: var(--color-bg-active);
+      }
+
+      .btn-sm { height: 24px; padding: 0 8px; font-size: 12px; }
+      .btn-lg { height: 36px; padding: 0 16px; font-size: 14px; }
+
+      /* Subtle row/list-item hover used in dropdowns and section bodies. */
+      .row-hover { transition: background-color var(--transition-fast); }
+      .row-hover:hover { background-color: var(--color-bg-hover); }
+
+      /* Skeleton loading placeholders. A neutral surface with a slow
+         left-to-right shimmer. Mirrored in src/components/ui/Skeleton.js. */
+      .skeleton {
+        position: relative;
+        overflow: hidden;
+        background-color: var(--color-bg-subtle);
+        border-radius: var(--radius-md);
+      }
+      .skeleton::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          rgba(255, 255, 255, 0.55) 50%,
+          transparent 100%
+        );
+        transform: translateX(-100%);
+        animation: skeleton-shimmer 1.4s ease-in-out infinite;
+      }
+      @keyframes skeleton-shimmer {
+        100% { transform: translateX(100%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .skeleton::after { animation: none; }
+      }
+
       /* Hide the horizontal scrollbar on the scenes strip while keeping
          scroll behavior. Firefox gets `scrollbar-width: none`; Chromium /
          Electron / Safari go through the WebKit pseudo-element. */

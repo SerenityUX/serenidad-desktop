@@ -1,24 +1,24 @@
 import React from 'react';
+import { useOnboarding, STEPS } from '../../../context/OnboardingContext';
 
-const GenerateVisualsButton = ({ label, disabled, onClick }) => (
-  <button
-    onClick={onClick}
-    disabled={disabled}
-    style={{
-      backgroundColor: '#fff',
-      color: '#404040',
-      border: '1px solid #D9D9D9',
-      borderRadius: '6px',
-      padding: '8px 12px',
-      marginLeft: 12,
-      marginRight: 12,
-      fontSize: 13.3,
-      cursor: disabled ? 'not-allowed' : 'pointer',
-      opacity: disabled ? 0.6 : 1,
-    }}
-  >
-    {label || 'Generate Visuals'}
-  </button>
-);
+const GenerateVisualsButton = ({ label, disabled, onClick, primary = false }) => {
+  const onboarding = useOnboarding();
+  const handleClick = (e) => {
+    onboarding.advanceFrom(STEPS.EDITOR_GENERATE);
+    onClick?.(e);
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={disabled}
+      data-onboard="generate-button"
+      className={`btn ${primary ? 'btn-primary' : ''}`}
+      style={{ width: '100%', height: 32 }}
+    >
+      {label || 'Generate visuals'}
+    </button>
+  );
+};
 
 export default GenerateVisualsButton;

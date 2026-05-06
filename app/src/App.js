@@ -46,7 +46,12 @@ const useIsMobileViewport = () => {
 
 const MainApp = () => {
   const { token } = useAuth();
-  const [projects, setProjects] = useState([]);
+  // `null` = haven't fetched yet (show skeleton). After the first fetch
+  // settles, this is always an array — empty array means "no projects" and
+  // is what EmptyProjectsState renders against. Tracking the first-load
+  // distinction here avoids the empty-state flash when the user actually
+  // has projects.
+  const [projects, setProjects] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
   /**
    * Three states: undefined = no result yet, null = success (modal can close
@@ -85,7 +90,7 @@ const MainApp = () => {
   }, [refreshProjects]);
 
   const handleCreateSubmit = useCallback(
-    async ({ projectName, width, height }) => {
+    async ({ projectName, width, height, style }) => {
       try {
         if (!token) {
           throw new Error(
@@ -103,7 +108,7 @@ const MainApp = () => {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ name: trimmedName, width: w, height: h }),
+          body: JSON.stringify({ name: trimmedName, width: w, height: h, style }),
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -130,6 +135,7 @@ const MainApp = () => {
           '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
       }}
     >
+      {projects == null ? <LauncherLoadingSkeleton /> : (
       <FolderView
         projects={projects}
         createOpen={createOpen}
@@ -140,7 +146,9 @@ const MainApp = () => {
         onCloseCreate={() => setCreateOpen(false)}
         onCreateSubmit={handleCreateSubmit}
         createResult={createResult}
+        onProjectsChanged={refreshProjects}
       />
+      )}
     </div>
   );
 };

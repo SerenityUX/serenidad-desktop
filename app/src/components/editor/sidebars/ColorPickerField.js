@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
+import { color, font, radius } from '../../../lib/tokens';
 
-const ColorPickerField = ({ color, onChange }) => {
+const ColorPickerField = ({ color: value, onChange }) => {
   const inputRef = useRef(null);
   return (
     <div
@@ -9,27 +10,31 @@ const ColorPickerField = ({ color, onChange }) => {
         width: '50%',
         display: 'flex',
         alignItems: 'center',
-        gap: 4,
-        borderRadius: '4px',
-        border: '1px solid #D9D9D9',
-        padding: '4px',
-        fontSize: 14,
+        gap: 6,
+        borderRadius: radius.md,
+        border: `1px solid ${color.border}`,
+        backgroundColor: color.bg,
+        padding: '5px 8px',
+        fontSize: font.size.md,
+        color: color.text,
         cursor: 'pointer',
+        boxSizing: 'border-box',
       }}
     >
       <div
         style={{
-          width: 20,
-          height: 20,
-          backgroundColor: color,
-          border: '1px solid #D9D9D9',
-          borderRadius: '2px',
+          width: 16,
+          height: 16,
+          backgroundColor: value,
+          border: `1px solid ${color.border}`,
+          borderRadius: radius.sm,
+          flex: '0 0 auto',
         }}
       />
       <input
         ref={inputRef}
         type="color"
-        value={color}
+        value={value}
         onChange={onChange}
         style={{
           position: 'absolute',
@@ -40,7 +45,14 @@ const ColorPickerField = ({ color, onChange }) => {
           visibility: 'hidden',
         }}
       />
-      <span style={{ flexGrow: 1, textAlign: 'center' }}>{color}</span>
+      <span style={{
+        flexGrow: 1,
+        textAlign: 'center',
+        color: color.textMuted,
+        fontVariantNumeric: 'tabular-nums',
+      }}>
+        {value}
+      </span>
     </div>
   );
 };

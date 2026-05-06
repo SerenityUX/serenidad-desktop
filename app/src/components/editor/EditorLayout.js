@@ -11,6 +11,8 @@ const EditorLayout = ({
   showShare = false,
   voice,
   projectName,
+  view,
+  onViewChange,
   leftSidebarProps,
   centerStageProps,
   rightSidebarProps,
@@ -21,13 +23,13 @@ const EditorLayout = ({
     width: '100%',
     display: 'flex',
     flexDirection: 'column',
-    fontFamily: 'Arial, sans-serif',
+    fontFamily: 'inherit',
     margin: 0,
     padding: 0,
     minHeight: 0,
     overflow: 'hidden',
   }}>
-    <TitleBar onExport={onExport} onShare={onShare} showShare={showShare} voice={voice} projectName={projectName} />
+    <TitleBar onExport={onExport} onShare={onShare} showShare={showShare} voice={voice} projectName={projectName} view={view} onViewChange={onViewChange} />
 
 
     <div style={{ display: 'flex', width: '100%', flex: 1, minHeight: 0 }}>

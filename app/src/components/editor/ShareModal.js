@@ -1,70 +1,31 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiUrl } from '../../config';
+import { color, font, radius, space } from '../../lib/tokens';
 
-const overlayStyle = {
-  position: 'fixed',
-  inset: 0,
-  backgroundColor: 'rgba(0,0,0,0.5)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  zIndex: 10000,
-};
-
-const cardStyle = {
-  backgroundColor: '#fff',
-  borderRadius: 8,
-  padding: 20,
-  width: 380,
-  maxWidth: '90%',
-  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
-};
-
-const inputStyle = {
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: '8px 10px',
-  fontSize: 14,
-  border: '1px solid #D9D9D9',
-  borderRadius: 4,
-  outline: 'none',
-};
-
-const primaryBtn = {
-  backgroundColor: '#1F93FF',
-  color: '#fff',
-  border: '0',
-  borderRadius: 4,
-  padding: '6px 12px',
-  fontSize: 14,
-  cursor: 'pointer',
-};
-
-const secondaryBtn = {
-  backgroundColor: '#fff',
-  color: '#333',
-  border: '1px solid #D9D9D9',
-  borderRadius: 4,
-  padding: '6px 12px',
-  fontSize: 14,
-  cursor: 'pointer',
+const labelStyle = {
+  margin: 0,
+  color: color.textMuted,
+  fontSize: font.size.xs,
+  fontWeight: font.weight.medium,
+  letterSpacing: 0.2,
+  textTransform: 'uppercase',
 };
 
 const removeBtnStyle = {
   width: 22,
   height: 22,
-  borderRadius: 11,
-  border: '0',
+  borderRadius: radius.sm,
+  border: 'none',
   backgroundColor: 'transparent',
-  color: '#888',
+  color: color.textMuted,
   cursor: 'pointer',
-  fontSize: 16,
-  lineHeight: '20px',
+  fontSize: 14,
+  lineHeight: 1,
   padding: 0,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
+  transition: 'background-color 120ms ease, color 120ms ease',
 };
 
 const ShareModal = ({ projectId, authToken, onClose }) => {
@@ -176,24 +137,71 @@ const ShareModal = ({ projectId, authToken, onClose }) => {
   };
 
   return (
-    <div style={overlayStyle} onMouseDown={onClose}>
-      <div style={cardStyle} onMouseDown={(e) => e.stopPropagation()}>
-        <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 14 }}>
-          Share project
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 10000,
+        backgroundColor: color.overlay,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+      onMouseDown={onClose}
+    >
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          width: 400,
+          maxWidth: '90%',
+          padding: space[6],
+          borderRadius: radius.xl,
+          backgroundColor: color.bg,
+          border: `1px solid ${color.border}`,
+          fontFamily: font.family,
+          color: color.text,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: space[4],
+        }}
+      >
+        <div>
+          <p style={{
+            margin: 0,
+            fontSize: font.size.lg,
+            fontWeight: font.weight.semibold,
+            letterSpacing: '-0.01em',
+          }}>
+            Share project
+          </p>
+          <p style={{
+            margin: `${space[1]}px 0 0 0`,
+            fontSize: font.size.md,
+            color: color.textMuted,
+          }}>
+            Anyone you add can open and edit this project.
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div style={{ display: 'flex', gap: 8 }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: space[1] }}>
+          <p style={labelStyle}>Email</p>
+          <div style={{ display: 'flex', gap: space[2] }}>
             <input
               type="email"
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="email@example.com"
-              style={inputStyle}
               disabled={submitting}
+              style={{ flex: 1 }}
             />
-            <button type="submit" style={primaryBtn} disabled={submitting || !email.trim()}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={submitting || !email.trim()}
+            >
               {submitting ? 'Sharing…' : 'Share'}
             </button>
           </div>
@@ -202,77 +210,112 @@ const ShareModal = ({ projectId, authToken, onClose }) => {
         {message ? (
           <div
             style={{
-              marginTop: 10,
-              fontSize: 13,
-              color: message.type === 'error' ? '#B00020' : '#1B7F3A',
+              fontSize: font.size.sm,
+              lineHeight: 1.4,
+              color: message.type === 'error' ? color.textDanger : color.text,
+              backgroundColor: message.type === 'error'
+                ? 'rgba(207, 34, 46, 0.06)'
+                : color.bgAccentSubtle,
+              padding: `${space[2]}px ${space[3]}px`,
+              borderRadius: radius.md,
+              border: `1px solid ${message.type === 'error' ? 'rgba(207, 34, 46, 0.2)' : 'rgba(31, 147, 255, 0.2)'}`,
             }}
           >
             {message.text}
           </div>
         ) : null}
 
-        <div style={{ marginTop: 18, fontSize: 13, fontWeight: 600 }}>
-          Shared with
-        </div>
-        <div style={{ marginTop: 6, maxHeight: 200, overflowY: 'auto' }}>
-          {shares.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#888' }}>No collaborators yet.</div>
-          ) : (
-            shares.map((u) => (
-              <div
-                key={u.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '4px 0',
-                  fontSize: 13,
-                }}
-              >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
+          <p style={labelStyle}>Shared with</p>
+          <div style={{
+            maxHeight: 220,
+            overflowY: 'auto',
+            border: `1px solid ${color.border}`,
+            borderRadius: radius.md,
+          }}>
+            {shares.length === 0 ? (
+              <div style={{
+                fontSize: font.size.sm,
+                color: color.textMuted,
+                padding: `${space[3]}px ${space[3]}px`,
+              }}>
+                No collaborators yet.
+              </div>
+            ) : (
+              shares.map((u, i) => (
                 <div
+                  key={u.id}
                   style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: 12,
-                    backgroundColor: '#E5E5E5',
-                    backgroundImage: u.profile_picture ? `url(${u.profile_picture})` : 'none',
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: space[2],
+                    padding: `${space[2]}px ${space[3]}px`,
+                    fontSize: font.size.md,
+                    borderTop: i === 0 ? 'none' : `1px solid ${color.border}`,
                   }}
-                />
-                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {u.pending_signup ? u.email : u.name}
-                    {u.pending_signup ? (
-                      <span style={{ color: '#888', fontSize: 11, marginLeft: 6 }}>
-                        invited
-                      </span>
+                >
+                  <div
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: '50%',
+                      backgroundColor: color.bgMuted,
+                      backgroundImage: u.profile_picture ? `url(${u.profile_picture})` : 'none',
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                    <span style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      color: color.text,
+                    }}>
+                      {u.pending_signup ? u.email : u.name}
+                      {u.pending_signup ? (
+                        <span style={{
+                          color: color.textFaint,
+                          fontSize: font.size.xs,
+                          marginLeft: space[2],
+                        }}>
+                          invited
+                        </span>
+                      ) : null}
+                    </span>
+                    {!u.pending_signup ? (
+                      <span style={{ fontSize: font.size.xs, color: color.textMuted }}>{u.email}</span>
                     ) : null}
-                  </span>
-                  {!u.pending_signup ? (
-                    <span style={{ fontSize: 11, color: '#666' }}>{u.email}</span>
+                  </div>
+                  {isOwner ? (
+                    <button
+                      type="button"
+                      title="Remove"
+                      onClick={() => handleRemove(u.id)}
+                      disabled={removingId === u.id}
+                      style={removeBtnStyle}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = color.bgHover;
+                        e.currentTarget.style.color = color.text;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = color.textMuted;
+                      }}
+                    >
+                      {removingId === u.id ? '…' : '×'}
+                    </button>
                   ) : null}
                 </div>
-                {isOwner ? (
-                  <button
-                    type="button"
-                    title="Remove"
-                    onClick={() => handleRemove(u.id)}
-                    disabled={removingId === u.id}
-                    style={removeBtnStyle}
-                  >
-                    {removingId === u.id ? '…' : '×'}
-                  </button>
-                ) : null}
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
         </div>
 
-        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
-          <button type="button" style={secondaryBtn} onClick={onClose}>
-            Close
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button type="button" className="btn" onClick={onClose}>
+            Done
           </button>
         </div>
       </div>

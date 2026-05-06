@@ -106,6 +106,7 @@ const ScenePreview = ({
   promptFocusToken,
   isPlaying = false,
   onVideoEnded,
+  characters = [],
 }) => {
   const mediaSrc =
     thumbnail != null && String(thumbnail).trim() !== ''
@@ -178,6 +179,7 @@ const ScenePreview = ({
         referencesUploading={referencesUploading}
         promptFocusToken={promptFocusToken}
         generateLabel={isVideoFrame ? 'Create Video' : undefined}
+        characters={characters}
       />
       <VideoStatusOverlay status={videoStatusMessage} error={videoError} onDismiss={onClearVideoError} />
     </div>

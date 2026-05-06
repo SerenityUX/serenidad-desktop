@@ -1,6 +1,6 @@
 import React from 'react';
-import { Img } from 'react-image';
 import { asset } from '../../../lib/asset';
+import Icon from '../../ui/Icon';
 
 const AddSceneButton = ({ aspectRatio, isPressed, onMouseDown, onMouseUp, onMouseLeave }) => (
   <div
@@ -25,18 +25,19 @@ const AddSceneButton = ({ aspectRatio, isPressed, onMouseDown, onMouseUp, onMous
     <div
       style={{
         aspectRatio,
-        border: '4px solid #D9D9D9',
+        border: '2px dashed rgba(255,255,255,0.25)',
         borderRadius: '12px',
         maxHeight: '100%',
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
+        color: 'rgba(255,255,255,0.6)',
         opacity: isPressed ? 0.7 : 1,
         transform: `scale(${isPressed ? 0.95 : 1})`,
-        transition: 'opacity 0.1s ease-out, transform 0.1s ease-out',
+        transition: 'opacity 0.1s ease-out, transform 0.1s ease-out, border-color 120ms ease',
       }}
     >
-      <Img src={asset('icons/Plus.svg')} style={{ width: '32px', height: '32px' }} alt="Add Item" />
+      <Icon src={asset('icons/Plus.svg')} size={28} title="Add scene" />
     </div>
   </div>
 );

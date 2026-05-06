@@ -111,11 +111,26 @@ module.exports = function createBillingRouter(pool) {
 
 // ─── handlers ────────────────────────────────────────────────────────────
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function userExists(pool, userId) {
+  if (!UUID_RE.test(String(userId || ""))) return false;
+  const r = await pool.query(`SELECT 1 FROM users WHERE id = $1`, [userId]);
+  return r.rows.length > 0;
+}
+
 async function handleCheckoutCompleted(pool, session) {
   const userId = session.client_reference_id;
   if (!userId) {
     console.warn(
       `[stripe-webhook] checkout ${session.id} missing client_reference_id; skipping`,
+    );
+    return;
+  }
+  if (!(await userExists(pool, userId))) {
+    console.warn(
+      `[stripe-webhook] checkout ${session.id} client_reference_id ${userId} is not a known user; skipping`,
     );
     return;
   }
@@ -168,6 +183,12 @@ async function handleInvoicePaid(pool, invoice) {
   if (!userId) {
     console.warn(
       `[stripe-webhook] invoice ${invoice.id} sub ${invoice.subscription} has no kodan_user_id metadata`,
+    );
+    return;
+  }
+  if (!(await userExists(pool, userId))) {
+    console.warn(
+      `[stripe-webhook] invoice ${invoice.id} kodan_user_id ${userId} not found; skipping`,
     );
     return;
   }

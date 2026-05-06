@@ -1,6 +1,5 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { Img } from 'react-image';
-import { asset } from '../../../lib/asset';
 
 // iOS dark-mode system blue / accent pink for video frames.
 const IOS_BLUE = '#0A84FF';
@@ -33,6 +32,7 @@ const SceneThumbnail = ({
   onOpenFolder,
 }) => {
   const localRef = useRef(null);
+  const [deleteHover, setDeleteHover] = useState(false);
   const setRefs = (el) => {
     localRef.current = el;
     if (typeof innerRef === 'function') innerRef(el);
@@ -95,31 +95,52 @@ const SceneThumbnail = ({
         <button
           type="button"
           aria-label="Delete scene"
+          title="Delete scene (shift-click to skip confirm)"
           onMouseDown={(e) => e.stopPropagation()}
           onMouseUp={(e) => e.stopPropagation()}
+          onMouseEnter={() => setDeleteHover(true)}
+          onMouseLeave={() => setDeleteHover(false)}
           onClick={(e) => { e.stopPropagation(); onDelete(e.shiftKey); }}
           style={{
             position: 'absolute',
-            top: 21,
-            right: 1,
-            padding: 11,
-            border: 0,
-            background: 'transparent',
+            top: 30,
+            right: 6,
+            width: 22,
+            height: 22,
+            borderRadius: '50%',
+            padding: 0,
+            border: 'none',
+            background: '#FE5F58',
+            color: '#fff',
             cursor: 'pointer',
             opacity: isSelected ? 1 : 0,
             pointerEvents: isSelected ? 'auto' : 'none',
             transform: `scale(${isSelected ? 1 : 0})`,
-            transition: 'opacity 0.25s ease-out, transform 0.25s ease-out',
+            transition: 'opacity 0.2s ease-out, transform 0.2s ease-out',
             zIndex: 10,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
           }}
         >
-          <Img
-            src={asset('icons/Minus.svg')}
-            style={{ width: 18, height: 18, pointerEvents: 'none' }}
-          />
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            style={{
+              pointerEvents: 'none',
+              opacity: deleteHover ? 0.3 : 0.1,
+              transition: 'opacity 120ms ease-out',
+            }}
+            aria-hidden
+          >
+            <path
+              d="M1.5 1.5 L8.5 8.5 M8.5 1.5 L1.5 8.5"
+              stroke="#000"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
       )}
       <div style={shapeStyle}>

@@ -171,6 +171,9 @@ module.exports = function createAnalyticsRouter(pool, requireAuth) {
     const amount = Number(req.body?.amount);
     const note = String(req.body?.note || "").slice(0, 500);
     if (!userId) return res.status(400).json({ error: "userId required" });
+    if (userId === req.user.id) {
+      return res.status(400).json({ error: "Cannot grant to yourself" });
+    }
     if (!Number.isFinite(amount) || amount === 0 || !Number.isInteger(amount)) {
       return res.status(400).json({ error: "amount must be a non-zero integer" });
     }

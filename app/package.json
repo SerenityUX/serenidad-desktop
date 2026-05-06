@@ -5,7 +5,8 @@
   "description": "Kōdan — single React tree, two targets (Electron + web) built with Vite",
   "main": "main/main.js",
   "scripts": {
-    "dev:web": "vite",
+    "dev:web": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"vite\"",
+    "dev:api": "nodemon --watch ../api --ext js,json,sql --ignore ../api/node_modules ../api/index.js",
     "build:web": "vite build",
     "preview:web": "vite preview",
     "build:electron": "vite build --mode electron",
@@ -29,8 +30,10 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^9.2.1",
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
+    "nodemon": "^3.1.14",
     "vite": "^5.4.21"
   },
   "build": {

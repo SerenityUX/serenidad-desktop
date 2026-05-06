@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 const PAGE_SIZE = 6;
 const VOICELINE_RESERVED_HEIGHT = 60;
@@ -151,6 +151,26 @@ const StoryboardView = ({
     () => scenes.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE),
     [scenes, safePage],
   );
+
+  // Page through the storyboard with ←/→ as long as no input is focused. The
+  // editor's own arrow-key handler (timeline scene navigation) only runs in
+  // the timeline view, so there's no conflict.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'ArrowRight') {
+        setPage((p) => Math.min(totalPages - 1, p + 1));
+      } else {
+        setPage((p) => Math.max(0, p - 1));
+      }
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [totalPages]);
 
   return (
     <div

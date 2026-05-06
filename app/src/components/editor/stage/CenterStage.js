@@ -9,7 +9,7 @@ const CenterStage = ({ aspectRatio, scenePreviewProps, voiceLineProps }) => (
       display: 'flex',
       width: '100%',
       padding: '42px',
-      backgroundColor: '#F2F2F2',
+      backgroundColor: '#f6f8fa',
       borderRadius: '0px',
       textAlign: 'center',
       alignItems: 'center',

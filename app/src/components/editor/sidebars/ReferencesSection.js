@@ -1,31 +1,30 @@
 import React, { useRef, useState } from 'react';
 import SectionHeader from '../shared/SectionHeader';
-import FieldLabel from '../shared/FieldLabel';
 import { asset } from '../../../lib/asset';
+import { color, font, radius, space } from '../../../lib/tokens';
 
 const THUMB = 48;
 const MIN_HEIGHT = 64;
 
 const dropZoneStyle = (active, disabled, hasItems) => ({
-  width: 'calc(100% - 32px)',
-  marginLeft: 12,
-  marginRight: 12,
+  width: '100%',
   boxSizing: 'border-box',
-  border: `1px ${hasItems ? 'solid' : 'dashed'} ${active ? '#404040' : '#D9D9D9'}`,
-  borderRadius: 4,
-  backgroundColor: active ? '#F5F5F5' : '#fff',
-  fontSize: 14,
-  color: '#808080',
-  padding: hasItems ? 6 : '4px 4px',
+  border: `1px ${hasItems ? 'solid' : 'dashed'} ${active ? color.borderFocus : color.border}`,
+  borderRadius: radius.md,
+  backgroundColor: active ? color.bgAccentSubtle : color.bg,
+  fontSize: font.size.md,
+  color: color.textMuted,
+  padding: hasItems ? space[2] : space[3],
   minHeight: MIN_HEIGHT,
   display: 'flex',
   alignItems: hasItems ? 'flex-start' : 'center',
   justifyContent: hasItems ? 'flex-start' : 'center',
   flexWrap: 'wrap',
-  gap: 6,
+  gap: space[1],
   textAlign: 'center',
   cursor: disabled ? 'not-allowed' : 'pointer',
   opacity: disabled ? 0.6 : 1,
+  transition: 'border-color 120ms ease, background-color 120ms ease',
 });
 
 const thumbStyle = {
@@ -33,16 +32,16 @@ const thumbStyle = {
   width: THUMB,
   height: THUMB,
   flex: '0 0 auto',
-  borderRadius: 4,
+  borderRadius: radius.sm,
   overflow: 'hidden',
-  border: '1px solid #D9D9D9',
-  backgroundColor: '#F2F2F2',
+  border: `1px solid ${color.border}`,
+  backgroundColor: color.bgSubtle,
 };
 
 const removeBtnStyle = {
   position: 'absolute',
-  top: 1,
-  right: 1,
+  top: 2,
+  right: 2,
   width: 16,
   height: 16,
   borderRadius: '50%',
@@ -59,10 +58,10 @@ const addMoreStyle = {
   flex: '0 0 auto',
   width: THUMB,
   height: THUMB,
-  borderRadius: 4,
-  border: '1px dashed #D9D9D9',
-  background: '#fff',
-  color: '#808080',
+  borderRadius: radius.sm,
+  border: `1px dashed ${color.border}`,
+  background: color.bg,
+  color: color.textMuted,
   fontSize: 20,
   lineHeight: 1,
   padding: 0,
@@ -116,11 +115,10 @@ const ReferencesSection = ({
   const hasItems = references.length > 0;
 
   return (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
       <SectionHeader icon={asset('icons/Picture.svg')} label="References" />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
-        <FieldLabel>{acceptVideos ? 'REFERENCE FRAMES' : 'REFERENCE IMAGES'}</FieldLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: space[1] }}>
         <div
           style={dropZoneStyle(dragActive, uploading, hasItems)}
           onDragOver={(e) => {
@@ -139,7 +137,7 @@ const ReferencesSection = ({
           {uploading && !hasItems ? (
             'Uploading…'
           ) : !hasItems ? (
-            acceptVideos ? 'Drop images or videos' : 'Drop images or upload'
+            acceptVideos ? 'Drop images or videos' : 'Drop images or click to upload'
           ) : (
             <>
               {references.map((url) => (
@@ -195,7 +193,7 @@ const ReferencesSection = ({
           />
         </div>
       </div>
-    </>
+    </div>
   );
 };
 

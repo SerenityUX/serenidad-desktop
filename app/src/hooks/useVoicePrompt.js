@@ -39,19 +39,16 @@ const playBubble = (audioCtx) => {
 };
 
 /**
- * Hold-to-talk hook: hold backtick to record, release to send.
- * Returns { active, mode: 'listening'|'loading', levels }.
+ * Hold-to-talk hook: hold backtick to record, release to send the audio
+ * through the project chat agent. The active scene index (when on a single
+ * frame) is forwarded as a context ref; in storyboard mode no frame ref is
+ * sent. Returns { active, mode: 'listening'|'loading', levels }.
  */
 export default function useVoicePrompt({
-  onUpdate,
   getAuthToken,
-  getCurrentPrompt,
-  getCurrentVoiceline,
-  getCurrentSpeaker,
-  getAvailableSpeakers,
-  getContext,
-  getModelId,
-  getReferences,
+  getProjectId,
+  getFrameContextRef,
+  onChatActivity,
 }) {
   const [active, setActive] = useState(false);
   const [mode, setMode] = useState('listening');
@@ -69,43 +66,23 @@ export default function useVoicePrompt({
   const responseAudioRef = useRef(null);
   const peakLevelRef = useRef(0);
   const voiceFramesRef = useRef(0);
-  const onUpdateRef = useRef(onUpdate);
   const getAuthTokenRef = useRef(getAuthToken);
-  const getCurrentPromptRef = useRef(getCurrentPrompt);
-  const getCurrentVoicelineRef = useRef(getCurrentVoiceline);
-  const getCurrentSpeakerRef = useRef(getCurrentSpeaker);
-  const getAvailableSpeakersRef = useRef(getAvailableSpeakers);
-  const getContextRef = useRef(getContext);
-  const getModelIdRef = useRef(getModelId);
-  const getReferencesRef = useRef(getReferences);
+  const getProjectIdRef = useRef(getProjectId);
+  const getFrameContextRefRef = useRef(getFrameContextRef);
+  const onChatActivityRef = useRef(onChatActivity);
 
-  useEffect(() => {
-    onUpdateRef.current = onUpdate;
-  }, [onUpdate]);
   useEffect(() => {
     getAuthTokenRef.current = getAuthToken;
   }, [getAuthToken]);
   useEffect(() => {
-    getCurrentPromptRef.current = getCurrentPrompt;
-  }, [getCurrentPrompt]);
+    getProjectIdRef.current = getProjectId;
+  }, [getProjectId]);
   useEffect(() => {
-    getCurrentVoicelineRef.current = getCurrentVoiceline;
-  }, [getCurrentVoiceline]);
+    getFrameContextRefRef.current = getFrameContextRef;
+  }, [getFrameContextRef]);
   useEffect(() => {
-    getCurrentSpeakerRef.current = getCurrentSpeaker;
-  }, [getCurrentSpeaker]);
-  useEffect(() => {
-    getAvailableSpeakersRef.current = getAvailableSpeakers;
-  }, [getAvailableSpeakers]);
-  useEffect(() => {
-    getContextRef.current = getContext;
-  }, [getContext]);
-  useEffect(() => {
-    getModelIdRef.current = getModelId;
-  }, [getModelId]);
-  useEffect(() => {
-    getReferencesRef.current = getReferences;
-  }, [getReferences]);
+    onChatActivityRef.current = onChatActivity;
+  }, [onChatActivity]);
 
   const cleanupRecording = useCallback(() => {
     if (rafRef.current) {
@@ -134,7 +111,8 @@ export default function useVoicePrompt({
   const sendAudio = useCallback(
     async (blob) => {
       const token = getAuthTokenRef.current?.();
-      if (!token) {
+      const projectId = getProjectIdRef.current?.();
+      if (!token || !projectId) {
         dismiss();
         return;
       }
@@ -142,30 +120,18 @@ export default function useVoicePrompt({
       try {
         const fd = new FormData();
         fd.append('audio', blob, 'voice.webm');
-        const currentPrompt = getCurrentPromptRef.current?.() || '';
-        if (currentPrompt) fd.append('current_prompt', currentPrompt);
-        const currentVoiceline = getCurrentVoicelineRef.current?.() || '';
-        if (currentVoiceline) fd.append('current_voiceline', currentVoiceline);
-        const currentSpeaker = getCurrentSpeakerRef.current?.() || '';
-        if (currentSpeaker) fd.append('current_speaker', currentSpeaker);
-        const availableSpeakers = getAvailableSpeakersRef.current?.();
-        if (Array.isArray(availableSpeakers) && availableSpeakers.length) {
-          fd.append('available_speakers', JSON.stringify(availableSpeakers));
-        }
-        const context = getContextRef.current?.() || '';
-        if (context) fd.append('context', context);
-        const modelId = getModelIdRef.current?.() || '';
-        if (modelId) fd.append('model_id', modelId);
-        const refs = getReferencesRef.current?.();
-        if (Array.isArray(refs) && refs.length) {
-          fd.append('references', JSON.stringify(refs));
-        }
+        const frameRef = getFrameContextRefRef.current?.();
+        const refs = frameRef ? [frameRef] : [];
+        fd.append('contextRefs', JSON.stringify(refs));
 
-        const res = await fetch(apiUrl('/voice/prompt'), {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: fd,
-        });
+        const res = await fetch(
+          apiUrl(`/chat/projects/${encodeURIComponent(projectId)}/voice`),
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: fd,
+          },
+        );
         if (!res.ok) {
           const errBody = await res.json().catch(() => ({}));
           throw new Error(errBody.error || `HTTP ${res.status}`);
@@ -178,15 +144,7 @@ export default function useVoicePrompt({
         let audioPlayed = false;
 
         const handleEvent = (event, data) => {
-          if (event === 'voice_update' && data && typeof data === 'object') {
-            onUpdateRef.current?.({
-              voiceline: typeof data.voiceline === 'string' ? data.voiceline : null,
-              prompt: typeof data.prompt === 'string' ? data.prompt : '',
-              speaker: typeof data.speaker === 'string' ? data.speaker : null,
-              editorResponse:
-                typeof data.editorResponse === 'string' ? data.editorResponse : '',
-            });
-          } else if (event === 'response_audio' && data?.url && !audioPlayed) {
+          if (event === 'response_audio' && data?.url && !audioPlayed) {
             audioPlayed = true;
             try {
               if (responseAudioRef.current) responseAudioRef.current.pause();
@@ -198,8 +156,9 @@ export default function useVoicePrompt({
               console.warn('response audio play failed', e);
             }
           } else if (event === 'error') {
-            console.error('voice stream error:', data?.error);
+            console.error('voice stream error:', data?.message || data?.error);
           }
+          onChatActivityRef.current?.(event, data);
         };
 
         for (;;) {

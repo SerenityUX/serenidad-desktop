@@ -9,6 +9,9 @@ const createProjectsRouter = require("./routes/projects");
 const createVoiceRouter = require("./routes/voice");
 const createBillingRouter = require("./routes/billing");
 const createAnalyticsRouter = require("./routes/analytics");
+const createChatRouter = require("./routes/chat");
+const createCharactersRouter = require("./routes/characters");
+const createRealtimeRouter = require("./routes/realtime");
 const createLogRequest = require("./middleware/logRequest");
 const desktopVersion = require("./desktopVersion");
 
@@ -28,7 +31,25 @@ async function main() {
   }
 
   const app = express();
-  app.use(cors());
+
+  // Whitelist origins. CORS_ALLOWED_ORIGINS is a comma-separated env var.
+  // Electron / native fetch sends no Origin header — allow those (origin === undefined).
+  const allowedOrigins = (
+    process.env.CORS_ALLOWED_ORIGINS ||
+    "https://cocreate.app,https://www.cocreate.app,https://serenidad.app,https://www.serenidad.app,https://cocreateblog.vercel.app,http://localhost:3000,http://localhost:5173"
+  )
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  app.use(
+    cors({
+      origin(origin, cb) {
+        if (!origin) return cb(null, true);
+        if (allowedOrigins.includes(origin)) return cb(null, true);
+        return cb(new Error("Not allowed by CORS"));
+      },
+    }),
+  );
 
   // Stripe webhook MUST receive the raw request body so we can verify its
   // signature — mount it BEFORE express.json so the parser doesn't consume
@@ -59,6 +80,11 @@ async function main() {
     app.use("/projects", createProjectsRouter(pool, requireAuth));
     app.use("/voice", createVoiceRouter(pool, requireAuth));
     app.use("/analytics", createAnalyticsRouter(pool, requireAuth));
+    app.use("/chat", createChatRouter(pool, requireAuth));
+    app.use("/characters", createCharactersRouter(pool, requireAuth));
+    // Realtime SSE owns its own auth (token via query param) because the
+    // browser EventSource can't set Authorization headers.
+    app.use("/realtime", createRealtimeRouter(pool));
   }
 
   const server = app.listen(port, () => {
