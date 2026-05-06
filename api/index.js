@@ -32,24 +32,11 @@ async function main() {
 
   const app = express();
 
-  // Whitelist origins. CORS_ALLOWED_ORIGINS is a comma-separated env var.
-  // Electron / native fetch sends no Origin header — allow those (origin === undefined).
-  const allowedOrigins = (
-    process.env.CORS_ALLOWED_ORIGINS ||
-    "https://cocreate.app,https://www.cocreate.app,https://serenidad.app,https://www.serenidad.app,https://cocreateblog.vercel.app,http://localhost:3000,http://localhost:5173"
-  )
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  app.use(
-    cors({
-      origin(origin, cb) {
-        if (!origin) return cb(null, true);
-        if (allowedOrigins.includes(origin)) return cb(null, true);
-        return cb(new Error("Not allowed by CORS"));
-      },
-    }),
-  );
+  // CORS: permissive. Any origin can call the API. Auth is enforced by the
+  // Bearer-token check in middleware/requireAuth — origin is not relied on
+  // for security. The cors() default reflects the request Origin in
+  // Access-Control-Allow-Origin so preflights succeed everywhere.
+  app.use(cors());
 
   // Stripe webhook MUST receive the raw request body so we can verify its
   // signature — mount it BEFORE express.json so the parser doesn't consume

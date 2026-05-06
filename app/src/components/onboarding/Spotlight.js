@@ -20,26 +20,53 @@ const useTargetRect = (selector, active) => {
       return undefined;
     }
 
-    let raf = 0;
+    let cancelled = false;
+    let lastKey = '';
     const measure = () => {
+      if (cancelled) return;
       const el = document.querySelector(selector);
       if (!el) {
-        setRect(null);
+        if (lastKey !== '') {
+          lastKey = '';
+          setRect(null);
+        }
       } else {
         const r = el.getBoundingClientRect();
-        setRect({
-          top: r.top,
-          left: r.left,
-          width: r.width,
-          height: r.height,
-        });
+        // Only push state when the rect actually changes — otherwise we
+        // burn the page on a perpetual re-render loop.
+        const key = `${r.top}|${r.left}|${r.width}|${r.height}`;
+        if (key !== lastKey) {
+          lastKey = key;
+          setRect({
+            top: r.top,
+            left: r.left,
+            width: r.width,
+            height: r.height,
+          });
+        }
       }
-      raf = window.requestAnimationFrame(measure);
     };
     measure();
 
+    const onScrollOrResize = () => measure();
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+
+    // Catch transitions / DOM mutations that don't trigger scroll/resize
+    // (modal opening, sidebar mounts, etc.) without polling every frame.
+    const mo = new MutationObserver(() => measure());
+    mo.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style', 'class'],
+    });
+
     return () => {
-      if (raf) window.cancelAnimationFrame(raf);
+      cancelled = true;
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+      mo.disconnect();
     };
   }, [selector, active]);
 

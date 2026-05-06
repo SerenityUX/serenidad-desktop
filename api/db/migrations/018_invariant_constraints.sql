@@ -33,38 +33,46 @@ WHERE id IN (SELECT id FROM ranked WHERE rn > 1);
 CREATE UNIQUE INDEX IF NOT EXISTS characters_project_lower_name_uniq
   ON characters (project_id, lower(name));
 
--- 3) characters: name must be non-blank after trim.
+-- 3) characters: name must be non-blank after trim. NOT VALID grandfathers
+--    any pre-existing rows that violate the constraint — only future writes
+--    are checked. Avoids the failure mode where a single bad row in
+--    production blocks the entire migration from applying and prevents the
+--    server from booting via `start:deploy`.
 ALTER TABLE characters
   DROP CONSTRAINT IF EXISTS characters_name_not_blank;
 ALTER TABLE characters
   ADD CONSTRAINT characters_name_not_blank
-  CHECK (char_length(btrim(name)) > 0);
+  CHECK (char_length(btrim(name)) > 0)
+  NOT VALID;
 
--- 4) projects: dimensions must be positive. The chat-route bug where width
---    was undefined wouldn't have inserted a row with NULL (NOT NULL caught
---    that), but if we ever introduce a partial UPDATE path it would have
---    silently let through 0 / negative. Cheap to enforce now.
+-- 4) projects: dimensions must be positive. NOT VALID for the same reason
+--    as above.
 ALTER TABLE projects
   DROP CONSTRAINT IF EXISTS projects_dimensions_positive;
 ALTER TABLE projects
   ADD CONSTRAINT projects_dimensions_positive
-  CHECK (width > 0 AND height > 0);
+  CHECK (width > 0 AND height > 0)
+  NOT VALID;
 
 -- 5) projects: name must be non-blank.
 ALTER TABLE projects
   DROP CONSTRAINT IF EXISTS projects_name_not_blank;
 ALTER TABLE projects
   ADD CONSTRAINT projects_name_not_blank
-  CHECK (char_length(btrim(name)) > 0);
+  CHECK (char_length(btrim(name)) > 0)
+  NOT VALID;
 
 -- 6) users.role: closed enum. The route code does `role === 'admin'` and
 --    anything else falls into the user bucket — fine — but we want any
 --    write that tries to set "moderator" or a typo to fail loudly.
+--    NOT VALID so an in-flight value we don't know about doesn't break
+--    deploy.
 ALTER TABLE users
   DROP CONSTRAINT IF EXISTS users_role_enum;
 ALTER TABLE users
   ADD CONSTRAINT users_role_enum
-  CHECK (role IN ('user', 'admin'));
+  CHECK (role IN ('user', 'admin'))
+  NOT VALID;
 
 -- 7) chat_pending_runs.state must always be a JSON object (not null/array).
 --    Resolve loops assume state.messages / state.toolLog / state.pending
@@ -73,6 +81,7 @@ ALTER TABLE chat_pending_runs
   DROP CONSTRAINT IF EXISTS chat_pending_runs_state_object;
 ALTER TABLE chat_pending_runs
   ADD CONSTRAINT chat_pending_runs_state_object
-  CHECK (jsonb_typeof(state) = 'object');
+  CHECK (jsonb_typeof(state) = 'object')
+  NOT VALID;
 
 COMMIT;
