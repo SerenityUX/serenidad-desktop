@@ -31,6 +31,7 @@ const ScenePlaceholder = ({
   generateLabel,
   promptFocusToken,
   characters = [],
+  compact = false,
 }) => {
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef(null);
@@ -85,20 +86,27 @@ const ScenePlaceholder = ({
   return (
     <div
       style={{
-        aspectRatio,
+        // On narrow screens, dropping the fixed aspectRatio + clipping
+        // lets the prompt card grow to its natural height instead of
+        // overflowing horizontally. Desktop keeps the cinematic 16:9.
+        aspectRatio: compact ? undefined : aspectRatio,
         maxWidth: '100%',
         width: '100%',
-        height: '100%',
-        borderRadius: radius.xl,
-        overflow: 'hidden',
+        height: compact ? 'auto' : '100%',
+        borderRadius: compact ? 0 : radius.xl,
+        overflow: compact ? 'visible' : 'hidden',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: color.bg,
-        padding: space[5],
+        // Compact: no white wrapper. Let the parent's grey show through
+        // and center the prompt card directly on it. Keep a touch of side
+        // padding so the card breathes away from the screen edges.
+        backgroundColor: compact ? 'transparent' : color.bg,
+        padding: compact ? `${space[2]}px ${space[3]}px` : space[5],
         boxSizing: 'border-box',
         position: 'relative',
+        minWidth: 0,
       }}
     >
       {hasItems ? (

@@ -72,6 +72,16 @@ const AnimeCarousel = () => {
   const FRAMES = [1, 2, 3, 4, 5, 6, 7, 8];
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
+  // Touch-swipe state. We track the starting X + a "swiped" flag so a
+  // gesture that crosses the threshold doesn't double-trigger and so a
+  // tap (no movement) doesn't accidentally advance.
+  const touchStartX = useRef(null);
+  const touchStartY = useRef(null);
+  const swipeFiredRef = useRef(false);
+
+  const advance = (delta) => {
+    setActive((i) => (i + delta + FRAMES.length) % FRAMES.length);
+  };
 
   useEffect(() => {
     if (paused) return undefined;
@@ -83,10 +93,46 @@ const AnimeCarousel = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paused]);
 
+  const handleTouchStart = (e) => {
+    const t = e.touches[0];
+    touchStartX.current = t.clientX;
+    touchStartY.current = t.clientY;
+    swipeFiredRef.current = false;
+    setPaused(true);
+  };
+
+  const handleTouchMove = (e) => {
+    if (touchStartX.current == null || swipeFiredRef.current) return;
+    const t = e.touches[0];
+    const dx = t.clientX - touchStartX.current;
+    const dy = t.clientY - touchStartY.current;
+    // Only act on mostly-horizontal gestures so vertical scrolling isn't
+    // hijacked. Threshold matches what most native carousels use.
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+      advance(dx < 0 ? 1 : -1);
+      swipeFiredRef.current = true;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStartX.current = null;
+    touchStartY.current = null;
+    // Resume auto-advance on a small delay so the user can take a beat
+    // after a swipe before the next slide arrives.
+    setTimeout(() => setPaused(false), 600);
+  };
+
   return (
     <div
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+      role="region"
+      aria-roledescription="carousel"
+      aria-label="Anime frame samples"
       style={{
         position: "relative",
         width: "100%",
@@ -97,6 +143,7 @@ const AnimeCarousel = () => {
         backgroundColor: "#0E0E10",
         boxShadow:
           "0 30px 80px rgba(0,0,0,0.18), inset 0 0 0 1px rgba(255,255,255,0.06)",
+        touchAction: "pan-y",
       }}
     >
       {FRAMES.map((n, i) => (
@@ -436,7 +483,7 @@ const TenBuckScreen = () => {
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Full Name"
+                  placeholder="Name"
                   required
                   autoComplete="name"
                   style={{

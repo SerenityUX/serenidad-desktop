@@ -989,14 +989,18 @@ const ChatView = ({ projectId, onStoryboardChanged, onToolNavigate, refreshKey =
           setApprovalRun((prev) => (prev ? { ...prev, runId: p.runId } : { runId: p.runId, items: [] }));
         } else if (p.type === 'done') {
           // The 'done' agent_step carries the persisted assistant message.
-          // Clear the approval UI; the chat.message_created event delivers
-          // the message itself.
+          // Clear the approval UI + live tool events; the chat.message_created
+          // event delivers the message itself, and its attachments already
+          // contain all the tool_calls — leaving `toolEvents` populated
+          // would render them a second time in the streaming row.
           setApprovalRun(null);
           setStreamingText('');
+          setToolEvents([]);
         } else if (p.type === 'cancelled') {
           setApprovalRun((prev) => (prev && prev.runId === p.runId ? null : prev));
           setSending(false);
           setStreamingText('');
+          setToolEvents([]);
         }
       }
     });
@@ -1131,9 +1135,18 @@ const ChatView = ({ projectId, onStoryboardChanged, onToolNavigate, refreshKey =
                 : [...prev, parsed],
             );
             setStreamingText('');
+            // The persisted message already carries every tool_call in its
+            // attachments; leaving `toolEvents` populated here makes the
+            // still-mounted streaming row render the SAME pills again
+            // beside it — looks like a duplicate response.
+            setToolEvents([]);
             setApprovalRun(null);
           } else if (event === 'tool_call') {
-            setToolEvents((prev) => [...prev, parsed]);
+            setToolEvents((prev) =>
+              parsed?.tool_call_id && prev.some((e) => e.tool_call_id === parsed.tool_call_id)
+                ? prev
+                : [...prev, parsed],
+            );
             // generate_scene results update the matching approval card.
             if (parsed?.name === 'generate_scene' && parsed.tool_call_id) {
               setApprovalRun((prev) => {

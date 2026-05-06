@@ -84,8 +84,8 @@ module.exports = function createAuthRouter(pool, requireAuth) {
       } else {
         try {
           ins = await pool.query(
-            `INSERT INTO users (name, email, otp, otp_expires_at, signup_promo)
-             VALUES ($1, $2, $3, $4, $5)
+            `INSERT INTO users (name, email, otp, otp_expires_at, signup_promo, pending_signup)
+             VALUES ($1, $2, $3, $4, $5, TRUE)
              RETURNING id`,
             [name, email, otpHash, expires, promo],
           );

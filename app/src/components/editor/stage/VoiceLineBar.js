@@ -18,23 +18,37 @@ const VoiceLineBar = ({
   onVoiceTextBlur,
   speakerWav,
   onSpeakerChange,
+  compact = false,
 }) => (
-  <div style={{ width: '100%', gap: 12, display: 'flex', flexDirection: 'row', justifyContent: 'center', maxWidth: '520px', paddingTop: 24 }}>
+  <div
+    style={{
+      width: '100%',
+      gap: compact ? 8 : 12,
+      display: 'flex',
+      flexDirection: compact ? 'column' : 'row',
+      justifyContent: 'center',
+      maxWidth: '520px',
+      paddingTop: compact ? 12 : 24,
+      minWidth: 0,
+      boxSizing: 'border-box',
+    }}
+  >
     <input
       value={voiceText}
       onChange={onVoiceTextChange}
       onBlur={onVoiceTextBlur}
       placeholder="Voiceline for this scene..."
-      style={{ display: 'flex', flex: 1, minWidth: 0 }}
+      style={{ display: 'flex', flex: 1, minWidth: 0, width: '100%' }}
     />
 
     <div style={{
       paddingLeft: 0,
-      width: 160,
+      width: compact ? '100%' : 160,
       paddingRight: 8,
       backgroundColor: '#fff',
       border: '1px solid #D9D9D9',
       borderRadius: '8px',
+      boxSizing: 'border-box',
     }}>
       <select
         value={speakerWav}

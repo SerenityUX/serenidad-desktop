@@ -18,6 +18,8 @@ import useDocumentMeta from '../../hooks/useDocumentMeta';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import EditorOnboarding from '../onboarding/EditorOnboarding';
+import EditorLayoutMobile from './mobile/EditorLayoutMobile';
+import useIsMobile from '../../hooks/useIsMobile';
 import { subscribeProject } from '../../lib/realtime';
 import {
   recordIncomingEvent,
@@ -158,6 +160,7 @@ const ProjectComponent = ({ projectId }) => {
   // Cloud-only mode. The launcher bails before mount if no projectId.
   const isRemote = true;
   const { user: currentUser } = useAuth();
+  const isMobile = useIsMobile();
 
   // Project data + selection
   const [projectData, setProjectData] = useState(null);
@@ -2083,7 +2086,10 @@ const ProjectComponent = ({ projectId }) => {
   return (
     <>
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-    <EditorLayout
+    {(() => {
+      const Layout = isMobile ? EditorLayoutMobile : EditorLayout;
+      return (
+    <Layout
       onExport={handleExportProject}
       onShare={() => setShareOpen(true)}
       showShare={isRemote && Boolean(authToken)}
@@ -2260,14 +2266,17 @@ const ProjectComponent = ({ projectId }) => {
         onAddSceneMouseLeave: () => setPressedAddScene(false),
       }}
     />
+      );
+    })()}
     {activeView === 'chat' ? (
       <div
         style={{
           position: 'absolute',
-          top: 45,
+          top: 'calc(45px + var(--safe-top, 0px))',
           left: 0,
           right: 0,
           bottom: 0,
+          paddingBottom: 'var(--safe-bottom, 0px)',
           zIndex: 60,
           backgroundColor: '#fff',
         }}
@@ -2300,10 +2309,11 @@ const ProjectComponent = ({ projectId }) => {
       <div
         style={{
           position: 'absolute',
-          top: 45,
+          top: 'calc(45px + var(--safe-top, 0px))',
           left: 0,
           right: 0,
           bottom: 0,
+          paddingBottom: 'var(--safe-bottom, 0px)',
           zIndex: 60,
           backgroundColor: '#FAFAFA',
         }}
@@ -2320,10 +2330,11 @@ const ProjectComponent = ({ projectId }) => {
       <div
         style={{
           position: 'absolute',
-          top: 45, // below the title bar
+          top: 'calc(45px + var(--safe-top, 0px))', // below the title bar (+ iOS safe top)
           left: 0,
           right: 0,
           bottom: 0, // covers the scenes strip; the storyboard owns the rest
+          paddingBottom: 'var(--safe-bottom, 0px)',
           zIndex: 50,
           backgroundColor: '#fff',
           display: 'flex',

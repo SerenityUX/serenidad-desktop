@@ -49,17 +49,14 @@ export const OnboardingProvider = ({ children }) => {
       setStepState(STEPS.DONE);
       return;
     }
+    // Onboarding is temporarily disabled — default everyone to DONE so the
+    // guided tour doesn't show. Code retained for re-enabling later.
     try {
-      const raw = localStorage.getItem(storageKey(userId));
-      if (raw && ORDER.includes(raw)) {
-        setStepState(raw);
-      } else {
-        setStepState(STEPS.WELCOME);
-        localStorage.setItem(storageKey(userId), STEPS.WELCOME);
-      }
+      localStorage.setItem(storageKey(userId), STEPS.DONE);
     } catch {
-      setStepState(STEPS.WELCOME);
+      /* ignore quota */
     }
+    setStepState(STEPS.DONE);
   }, [userId]);
 
   const persist = useCallback(

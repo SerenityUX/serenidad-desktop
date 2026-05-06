@@ -4,45 +4,7 @@ import AuthScreen from "./components/auth/AuthScreen";
 import FolderView from "./components/projects/FolderView";
 import LauncherLoadingSkeleton from "./components/projects/LauncherLoadingSkeleton";
 import { apiUrl } from "./config";
-import platform, { isElectron } from "./platform";
-
-const MOBILE_MAX_WIDTH = 768;
-
-const MobileGate = () => (
-  <div
-    style={{
-      minHeight: "100vh",
-      width: "100%",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 24,
-      backgroundColor: "#000",
-      color: "#fff",
-      textAlign: "center",
-      fontFamily:
-        '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-      boxSizing: "border-box",
-    }}
-  >
-    <div style={{ maxWidth: 420, fontSize: 18, lineHeight: 1.5 }}>
-      Hey! The main CoCreate app is available only on laptop &amp; tablet!
-      Please switch to one of these devices to continue your experience.
-    </div>
-  </div>
-);
-
-const useIsMobileViewport = () => {
-  const [isMobile, setIsMobile] = useState(
-    typeof window !== "undefined" && window.innerWidth < MOBILE_MAX_WIDTH,
-  );
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < MOBILE_MAX_WIDTH);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-  return isMobile;
-};
+import platform from "./platform";
 
 const MainApp = () => {
   const { token } = useAuth();
@@ -155,7 +117,6 @@ const MainApp = () => {
 
 const AppGate = () => {
   const { ready, user } = useAuth();
-  const isMobile = useIsMobileViewport();
 
   if (!ready) {
     return <LauncherLoadingSkeleton />;
@@ -163,10 +124,6 @@ const AppGate = () => {
 
   if (!user) {
     return <AuthScreen />;
-  }
-
-  if (!isElectron && isMobile) {
-    return <MobileGate />;
   }
 
   return <MainApp />;

@@ -2,7 +2,10 @@
 <html style="height: 100%; width: 100%;" lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
 
     <!-- Favicons (universal, both Electron and web). Browsers pick the
          best size automatically; Apple Touch icon is used on iOS home
@@ -74,6 +77,28 @@
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
         text-rendering: optimizeLegibility;
+        /* Don't bounce-scroll the whole page on iOS — individual scroll
+           regions (chat, scenes strip, settings sheet) still scroll. */
+        overscroll-behavior-y: none;
+      }
+
+      /* Expose the iOS safe-area insets as CSS vars so any inline style
+         can read them via `var(--safe-top)` etc. Safari / Chrome set
+         these from `viewport-fit=cover` (configured in the meta tag).
+         Other browsers fall back to 0 and nothing changes. */
+      :root {
+        --safe-top: env(safe-area-inset-top, 0px);
+        --safe-right: env(safe-area-inset-right, 0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
+        --safe-left: env(safe-area-inset-left, 0px);
+      }
+
+      /* Pin the app shell to the dynamic viewport so the URL bar
+         appearing/disappearing on iOS Safari doesn't crop content. The
+         100dvh unit accounts for the bottom toolbar; older browsers that
+         don't support it fall back gracefully to the earlier 100% rule. */
+      @supports (height: 100dvh) {
+        html, body { height: 100dvh; }
       }
 
       /* Modern, quiet form defaults. Subtle borders, focus ring uses border
