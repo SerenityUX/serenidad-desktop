@@ -3,47 +3,173 @@ import { Navigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { asset } from "../../lib/asset";
 
-const PRIMARY = "#4736C1";
-const TEXT = "#404040";
-const BORDER = "#D9D9D9";
+const TEXT = "#1A1A1A";
+const TEXT_MUTED = "#5C5C5C";
+const BORDER = "#E2E2E2";
+const ACCENT = "#111";
+const SLIDE_MS = 2600;
 
 const inputStyle = {
   color: TEXT,
   border: `1px solid ${BORDER}`,
-  borderRadius: 8,
-  padding: "10px 12px",
-  fontSize: 14,
+  borderRadius: 10,
+  padding: "12px 14px",
+  fontSize: 15,
   outline: "none",
   width: "100%",
   boxSizing: "border-box",
   backgroundColor: "#fff",
+  fontFamily: "inherit",
 };
 
 const buttonStyle = (disabled) => ({
   width: "100%",
-  padding: "12px 14px",
+  padding: "13px 16px",
   border: 0,
   borderRadius: 10,
-  backgroundColor: PRIMARY,
+  backgroundColor: disabled ? "#9F9F9F" : ACCENT,
   color: "#fff",
   cursor: disabled ? "not-allowed" : "pointer",
-  opacity: disabled ? 0.5 : 1,
   fontSize: 15,
-  fontWeight: 700,
+  fontWeight: 600,
   boxSizing: "border-box",
+  transition: "background-color 120ms ease, transform 120ms ease",
+  fontFamily: "inherit",
 });
 
 const linkButtonStyle = {
   background: "none",
   border: 0,
   padding: 0,
-  color: TEXT,
+  color: TEXT_MUTED,
   fontSize: 13,
   cursor: "pointer",
   textDecoration: "underline",
+  fontFamily: "inherit",
 };
 
 const OTP_LENGTH = 6;
+
+const useIsNarrow = (px = 880) => {
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth < px : false,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onResize = () => setNarrow(window.innerWidth < px);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [px]);
+  return narrow;
+};
+
+/**
+ * Auto-advancing crossfade carousel through 1.png … 8.png. Pauses on
+ * hover so users can linger on a frame they like. Pure CSS opacity
+ * stacking — no animation libs.
+ */
+const AnimeCarousel = () => {
+  const FRAMES = [1, 2, 3, 4, 5, 6, 7, 8];
+  const [active, setActive] = useState(0);
+  const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    if (paused) return undefined;
+    const id = setInterval(() => {
+      setActive((i) => (i + 1) % FRAMES.length);
+    }, SLIDE_MS);
+    return () => clearInterval(id);
+    // FRAMES is constant.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paused]);
+
+  return (
+    <div
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        minHeight: 360,
+        borderRadius: 18,
+        overflow: "hidden",
+        backgroundColor: "#0E0E10",
+        boxShadow:
+          "0 30px 80px rgba(0,0,0,0.18), inset 0 0 0 1px rgba(255,255,255,0.06)",
+      }}
+    >
+      {FRAMES.map((n, i) => (
+        <img
+          key={n}
+          src={asset(`${n}.png`)}
+          alt=""
+          draggable={false}
+          decoding="async"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            opacity: i === active ? 1 : 0,
+            transform: i === active ? "scale(1)" : "scale(1.04)",
+            transition:
+              "opacity 900ms ease-in-out, transform 4500ms linear",
+            userSelect: "none",
+            WebkitUserSelect: "none",
+            pointerEvents: "none",
+          }}
+        />
+      ))}
+
+      {/* Subtle bottom gradient + dot indicators for "this is a real reel" feel. */}
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 80,
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.45) 100%)",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 14,
+          display: "flex",
+          gap: 6,
+          justifyContent: "center",
+        }}
+      >
+        {FRAMES.map((n, i) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => setActive(i)}
+            aria-label={`Show frame ${i + 1}`}
+            style={{
+              width: i === active ? 18 : 6,
+              height: 6,
+              borderRadius: 999,
+              border: "none",
+              padding: 0,
+              backgroundColor:
+                i === active ? "#fff" : "rgba(255,255,255,0.5)",
+              cursor: "pointer",
+              transition: "width 220ms ease, background-color 220ms ease",
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
 
 const OtpInput = ({ value, onChange, disabled, onComplete }) => {
   const inputsRef = useRef([]);
@@ -103,7 +229,7 @@ const OtpInput = ({ value, onChange, disabled, onComplete }) => {
   };
 
   return (
-    <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+    <div style={{ display: "flex", gap: 8 }}>
       {Array.from({ length: OTP_LENGTH }).map((_, i) => (
         <input
           key={i}
@@ -120,14 +246,15 @@ const OtpInput = ({ value, onChange, disabled, onComplete }) => {
           onKeyDown={(e) => handleKeyDown(i, e)}
           onFocus={(e) => e.target.select()}
           style={{
-            width: 44,
+            flex: 1,
+            minWidth: 0,
             height: 52,
             textAlign: "center",
             fontSize: 22,
             fontWeight: 600,
             color: TEXT,
             border: `1px solid ${BORDER}`,
-            borderRadius: 8,
+            borderRadius: 10,
             outline: "none",
             backgroundColor: "#fff",
           }}
@@ -137,15 +264,9 @@ const OtpInput = ({ value, onChange, disabled, onComplete }) => {
   );
 };
 
-/**
- * Promo landing page: /tenbuck. New accounts created here get ✻1000
- * (about $10) instead of the standard ✻100. Existing accounts can't claim
- * — the API only applies the credit when pending_signup → false, which
- * only happens once per user.
- */
 const TenBuckScreen = () => {
   const { user, ready, requestSignup, verifyOtp } = useAuth();
-  const [step, setStep] = useState("form"); // form | otp
+  const [stepName, setStepName] = useState("form"); // form | otp
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [otp, setOtp] = useState("");
@@ -154,15 +275,13 @@ const TenBuckScreen = () => {
   const otpAttemptingRef = useRef(false);
 
   useEffect(() => {
-    if (step !== "otp") return;
+    if (stepName !== "otp") return;
     if (otp.length !== OTP_LENGTH) return;
     if (otp.includes("")) return;
     submitOtp(otp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [otp, step]);
+  }, [otp, stepName]);
 
-  // Already-signed-in users: bounce to the launcher. They can't claim the
-  // bonus on an existing account.
   if (ready && user) {
     return <Navigate to="/home" replace />;
   }
@@ -176,13 +295,13 @@ const TenBuckScreen = () => {
     setBusy(true);
     try {
       await requestSignup(trimmedEmail, trimmedName, "tenbuck");
-      setStep("otp");
+      setStepName("otp");
       setOtp("");
     } catch (err) {
       const msg = err?.message || "";
       if (/already registered/i.test(msg)) {
         setError(
-          "An account already exists for this email. The Shiba Buck bonus is for new accounts only — sign in normally.",
+          "An account already exists for this email. The bonus is for new accounts only — sign in normally instead.",
         );
       } else {
         setError(msg || "Could not send code");
@@ -212,208 +331,222 @@ const TenBuckScreen = () => {
     <div
       style={{
         minHeight: "100vh",
+        backgroundColor: "#FAFAFA",
+        color: TEXT,
+        fontFamily:
+          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
         boxSizing: "border-box",
-        background:
-          "radial-gradient(1200px 600px at 50% -100px, #FFF6E0 0%, #FFFDF8 60%, #fff 100%)",
-        fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-        color: TEXT,
       }}
     >
+      <style>
+        {`@keyframes tenbuckSlideIn {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+          }`}
+      </style>
       <div
         style={{
           width: "100%",
-          maxWidth: 420,
-          background: "#fff",
-          borderRadius: 18,
-          border: "1px solid #EFE7D2",
-          padding: 28,
-          boxShadow: "0 24px 60px rgba(120, 80, 0, 0.08)",
+          maxWidth: 560,
           display: "flex",
           flexDirection: "column",
-          alignItems: "center",
-          gap: 14,
+          gap: 28,
+          alignItems: "stretch",
         }}
       >
-        <img
-          src={asset("ShibaBuck.png")}
-          alt="Shiba Buck"
-          draggable={false}
-          style={{
-            width: 180,
-            height: 180,
-            objectFit: "contain",
-            userSelect: "none",
-            WebkitUserSelect: "none",
-            pointerEvents: "none",
-          }}
-        />
         <div
           style={{
-            textAlign: "center",
             display: "flex",
             flexDirection: "column",
-            gap: 6,
+            gap: 18,
+            width: "100%",
           }}
         >
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: 1.2,
-              color: "#B07A1A",
-              textTransform: "uppercase",
-            }}
-          >
-            Shiba Buck offer
-          </div>
           <h1
             style={{
               margin: 0,
-              fontSize: 26,
-              fontWeight: 800,
-              color: "#111",
-              letterSpacing: "-0.01em",
+              fontSize: 36,
+              lineHeight: 1.15,
+              fontWeight: 700,
+              letterSpacing: "-0.02em",
+              color: ACCENT,
             }}
           >
-            $10 of free tokens
+            <span style={{ whiteSpace: "nowrap" }}>
+              $10
+              <img
+                src={asset("ShibaBuck.png")}
+                alt=""
+                draggable={false}
+                style={{
+                  height: "0.95em",
+                  width: "auto",
+                  verticalAlign: "-0.18em",
+                  margin: "0 0.18em 0 0.18em",
+                  userSelect: "none",
+                  WebkitUserSelect: "none",
+                  pointerEvents: "none",
+                  display: "inline-block",
+                }}
+              />
+              bucks
+            </span>{" "}
+            to start making your own anime.
           </h1>
-          <p style={{ margin: 0, fontSize: 14, color: TEXT, lineHeight: 1.5 }}>
-            Sign up below and we&apos;ll drop{" "}
-            <strong>✻1,000</strong> into your CoCreate account — about ten
-            bucks&apos; worth — to make your first stories on us.
+
+          <p
+            style={{
+              margin: 0,
+              fontSize: 15,
+              color: TEXT_MUTED,
+              lineHeight: 1.55,
+            }}
+          >
+            Sign up and we&apos;ll drop ✻1,000 into your account — write a
+            scene, generate a frame, edit with your voice, export a clip.
+            No credit card.
           </p>
+
+          {stepName === "form" ? (
+            <form
+              onSubmit={submitForm}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                marginTop: 4,
+              }}
+            >
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@email.com"
+                required
+                autoComplete="email"
+                autoFocus
+                style={inputStyle}
+              />
+              {/^\S+@\S+\.\S+$/.test(email.trim()) ? (
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Full Name"
+                  required
+                  autoComplete="name"
+                  style={{
+                    ...inputStyle,
+                    animation: "tenbuckSlideIn 220ms ease-out",
+                  }}
+                />
+              ) : null}
+              <button
+                type="submit"
+                disabled={busy || !email.trim() || !name.trim()}
+                style={buttonStyle(busy || !email.trim() || !name.trim())}
+              >
+                {busy ? "Sending code…" : "Claim $10 in tokens"}
+              </button>
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 12,
+                  color: TEXT_MUTED,
+                  lineHeight: 1.4,
+                }}
+              >
+                New accounts only · One bonus per email
+              </p>
+              {error ? (
+                <p
+                  role="alert"
+                  style={{
+                    margin: 0,
+                    color: "#B12525",
+                    fontSize: 13,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {error}
+                </p>
+              ) : null}
+            </form>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitOtp(otp);
+              }}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                marginTop: 4,
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 14,
+                  color: TEXT_MUTED,
+                  lineHeight: 1.5,
+                }}
+              >
+                Check {email.trim()} for a {OTP_LENGTH}-digit code.
+              </p>
+              <OtpInput
+                value={otp}
+                onChange={setOtp}
+                disabled={busy}
+                onComplete={submitOtp}
+              />
+              <button
+                type="submit"
+                disabled={busy || otp.length !== OTP_LENGTH}
+                style={buttonStyle(busy || otp.length !== OTP_LENGTH)}
+              >
+                {busy ? "Verifying…" : "Verify & claim ✻1,000"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStepName("form");
+                  setOtp("");
+                  setError("");
+                }}
+                style={linkButtonStyle}
+              >
+                Use a different email
+              </button>
+              {error ? (
+                <p
+                  role="alert"
+                  style={{
+                    margin: 0,
+                    color: "#B12525",
+                    fontSize: 13,
+                  }}
+                >
+                  {error}
+                </p>
+              ) : null}
+            </form>
+          )}
         </div>
 
-        {step === "form" ? (
-          <form
-            onSubmit={submitForm}
-            style={{
-              width: "100%",
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-              marginTop: 4,
-            }}
-          >
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Your name"
-              required
-              autoComplete="name"
-              autoFocus
-              style={inputStyle}
-            />
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email address"
-              required
-              autoComplete="email"
-              style={inputStyle}
-            />
-            <button
-              type="submit"
-              disabled={busy || !email.trim() || !name.trim()}
-              style={buttonStyle(busy || !email.trim() || !name.trim())}
-            >
-              {busy ? "Sending code…" : "Claim ✻1,000"}
-            </button>
-            <p
-              style={{
-                margin: 0,
-                fontSize: 11,
-                color: "#9A8A6A",
-                textAlign: "center",
-                lineHeight: 1.4,
-              }}
-            >
-              New accounts only. One bonus per email.
-            </p>
-            {error ? (
-              <p
-                role="alert"
-                style={{
-                  margin: 0,
-                  color: "#C0392B",
-                  fontSize: 12,
-                  textAlign: "center",
-                }}
-              >
-                {error}
-              </p>
-            ) : null}
-          </form>
-        ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              submitOtp(otp);
-            }}
-            style={{
-              width: "100%",
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-              marginTop: 4,
-            }}
-          >
-            <p
-              style={{
-                margin: 0,
-                fontSize: 13,
-                color: TEXT,
-                textAlign: "center",
-              }}
-            >
-              We sent a {OTP_LENGTH}-digit code to {email.trim()}.
-            </p>
-            <OtpInput
-              value={otp}
-              onChange={setOtp}
-              disabled={busy}
-              onComplete={submitOtp}
-            />
-            <button
-              type="submit"
-              disabled={busy || otp.length !== OTP_LENGTH}
-              style={buttonStyle(busy || otp.length !== OTP_LENGTH)}
-            >
-              {busy ? "Verifying…" : "Verify & claim ✻1,000"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setStep("form");
-                setOtp("");
-                setError("");
-              }}
-              style={linkButtonStyle}
-            >
-              Use a different email
-            </button>
-            {error ? (
-              <p
-                role="alert"
-                style={{
-                  margin: 0,
-                  color: "#C0392B",
-                  fontSize: 12,
-                  textAlign: "center",
-                }}
-              >
-                {error}
-              </p>
-            ) : null}
-          </form>
-        )}
+        <div
+          style={{
+            width: "100%",
+            aspectRatio: "16 / 10",
+          }}
+        >
+          <AnimeCarousel />
+        </div>
       </div>
     </div>
   );

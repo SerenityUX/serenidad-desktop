@@ -20,6 +20,15 @@ const port = Number(process.env.PORT) || 3000;
 async function main() {
   const pool = createPool();
 
+  // pg-pool emits 'error' on the pool when an *idle* connection's socket
+  // dies (network blip, server-side timeout, EADDRNOTAVAIL on a long-idle
+  // socket). Without a handler, those bubble up as an unhandled 'error'
+  // event and crash the Node process. The pool itself replaces the dead
+  // client lazily, so all we have to do is log and let it recover.
+  pool.on("error", (err) => {
+    console.error("[pg pool] idle client error (recoverable):", err.message);
+  });
+
   let dbOk = false;
   try {
     const client = await pool.connect();
