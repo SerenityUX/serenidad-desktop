@@ -87,7 +87,6 @@ const Spotlight = ({
   placement = 'right',
   ctaLabel,
   onCta,
-  onSkip,
   step,
   total,
   // When no target is provided, render a centered hero card (welcome screen).
@@ -155,31 +154,15 @@ const Spotlight = ({
           >
             {body}
           </div>
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              marginTop: 8,
-              justifyContent: 'flex-end',
-            }}
-          >
-            {onSkip ? (
-              <button
-                type="button"
-                onClick={onSkip}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  color: '#6B7280',
-                  fontSize: 13,
-                  cursor: 'pointer',
-                  padding: '8px 12px',
-                }}
-              >
-                Skip tour
-              </button>
-            ) : null}
-            {onCta ? (
+          {onCta ? (
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                marginTop: 8,
+                justifyContent: 'flex-end',
+              }}
+            >
               <button
                 type="button"
                 onClick={onCta}
@@ -196,8 +179,8 @@ const Spotlight = ({
               >
                 {ctaLabel || 'Start'}
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -361,7 +344,7 @@ const Spotlight = ({
         >
           {body}
         </div>
-        {(onCta || onSkip) ? (
+        {onCta ? (
           <div
             style={{
               display: 'flex',
@@ -370,40 +353,22 @@ const Spotlight = ({
               justifyContent: 'flex-end',
             }}
           >
-            {onSkip ? (
-              <button
-                type="button"
-                onClick={onSkip}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  color: '#6B7280',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                  padding: '6px 8px',
-                }}
-              >
-                Skip
-              </button>
-            ) : null}
-            {onCta ? (
-              <button
-                type="button"
-                onClick={onCta}
-                style={{
-                  border: 'none',
-                  background: palette.bubble,
-                  color: palette.bubbleText,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  borderRadius: 6,
-                  padding: '6px 12px',
-                  cursor: 'pointer',
-                }}
-              >
-                {ctaLabel || 'Got it'}
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={onCta}
+              style={{
+                border: 'none',
+                background: palette.bubble,
+                color: palette.bubbleText,
+                fontSize: 13,
+                fontWeight: 600,
+                borderRadius: 6,
+                padding: '6px 12px',
+                cursor: 'pointer',
+              }}
+            >
+              {ctaLabel || 'Got it'}
+            </button>
           </div>
         ) : null}
       </div>

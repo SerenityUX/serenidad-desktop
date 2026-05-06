@@ -10,7 +10,7 @@ import { STEPS, useOnboarding } from '../../context/OnboardingContext';
 const TOTAL_STEPS = 6;
 
 const LauncherOnboarding = () => {
-  const { step, advanceFrom, skip } = useOnboarding();
+  const { step, advanceFrom } = useOnboarding();
 
   if (step === STEPS.WELCOME) {
     return (
@@ -23,7 +23,6 @@ const LauncherOnboarding = () => {
         }
         ctaLabel="Show me how"
         onCta={() => advanceFrom(STEPS.WELCOME)}
-        onSkip={skip}
       />
     );
   }
@@ -38,7 +37,8 @@ const LauncherOnboarding = () => {
         placement="bottom"
         step={2}
         total={TOTAL_STEPS}
-        onSkip={skip}
+        ctaLabel="Next"
+        onCta={() => advanceFrom(STEPS.CLICK_CREATE)}
       />
     );
   }
@@ -55,7 +55,8 @@ const LauncherOnboarding = () => {
         placement="right"
         step={3}
         total={TOTAL_STEPS}
-        onSkip={skip}
+        ctaLabel="Next"
+        onCta={() => advanceFrom(STEPS.FILL_NAME)}
       />
     );
   }

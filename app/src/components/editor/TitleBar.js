@@ -124,6 +124,9 @@ const ViewSwitcher = ({ projectName, view, onViewChange }) => {
             zIndex: 100,
             overflow: 'hidden',
             padding: 4,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
           }}
         >
           {Object.entries(VIEW_LABELS).map(([key, lbl]) => {

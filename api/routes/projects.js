@@ -278,13 +278,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
          RETURNING id`,
         [row.id, DEFAULT_MODEL_ID],
       );
-      const f2 = await client.query(
-        `INSERT INTO frames (project_id, prompt, result, model)
-         VALUES ($1, '', NULL, $2)
-         RETURNING id`,
-        [row.id, DEFAULT_MODEL_ID],
-      );
-      const frameIds = [f1.rows[0].id, f2.rows[0].id];
+      const frameIds = [f1.rows[0].id];
       await client.query(
         `UPDATE projects SET frame_ids = $2::uuid[] WHERE id = $1`,
         [row.id, frameIds],
@@ -1325,11 +1319,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
             `INSERT INTO frames (project_id, prompt, result, model) VALUES ($1, '', NULL, $2) RETURNING id`,
             [id, DEFAULT_MODEL_ID],
           );
-          const f2 = await client.query(
-            `INSERT INTO frames (project_id, prompt, result, model) VALUES ($1, '', NULL, $2) RETURNING id`,
-            [id, DEFAULT_MODEL_ID],
-          );
-          const seededIds = [f1.rows[0].id, f2.rows[0].id];
+          const seededIds = [f1.rows[0].id];
           await client.query(
             `UPDATE projects SET frame_ids = $2::uuid[] WHERE id = $1`,
             [id, seededIds],

@@ -9,7 +9,7 @@ const TOTAL_STEPS = 6;
  * to advance the final step automatically.
  */
 const EditorOnboarding = () => {
-  const { step, advanceFrom, skip } = useOnboarding();
+  const { step, advanceFrom } = useOnboarding();
 
   // Final step advances on the first backtick press — once they've tried
   // the voice trigger, we've delivered the lesson.
@@ -35,15 +35,16 @@ const EditorOnboarding = () => {
     return (
       <Spotlight
         active
-        selector='[data-onboard="prompt-textarea"]'
+        selector='[data-onboard="center-prompt"]'
         title="Describe your first scene"
         body={
-          'Type what you want to see — for example: "a cat astronaut floating above earth, dreamy lighting".'
+          'Type what you want to see in the big prompt box — for example: "a cat astronaut floating above earth, dreamy lighting".'
         }
-        placement="right"
+        placement="top"
         step={4}
         total={TOTAL_STEPS}
-        onSkip={skip}
+        ctaLabel="Next"
+        onCta={() => advanceFrom(STEPS.EDITOR_PROMPT)}
       />
     );
   }
@@ -52,13 +53,14 @@ const EditorOnboarding = () => {
     return (
       <Spotlight
         active
-        selector='[data-onboard="generate-button"]'
+        selector='[data-onboard="center-generate"]'
         title="Generate the visual"
-        body="Click Generate Visuals — the result will appear in the canvas. Each image costs a small amount of ✻ from your balance."
-        placement="right"
+        body="Tap the round arrow button to generate. Your result will appear right here in the canvas. Each image costs a small amount of ✻ from your balance."
+        placement="left"
         step={5}
         total={TOTAL_STEPS}
-        onSkip={skip}
+        ctaLabel="Next"
+        onCta={() => advanceFrom(STEPS.EDITOR_GENERATE)}
       />
     );
   }
@@ -74,7 +76,6 @@ const EditorOnboarding = () => {
         }
         ctaLabel="Got it"
         onCta={() => advanceFrom(STEPS.EDITOR_VOICE)}
-        onSkip={skip}
       />
     );
   }

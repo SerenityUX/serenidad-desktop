@@ -154,6 +154,7 @@ const ScenePlaceholder = ({
           }}
         >
           <div
+            data-onboard="center-prompt"
             onDragOver={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -244,6 +245,7 @@ const ScenePlaceholder = ({
                 type="button"
                 onClick={onGenerate}
                 disabled={generateDisabled}
+                data-onboard="center-generate"
                 aria-label={generateLabel || 'Generate visuals'}
                 title={generateLabel || 'Generate visuals'}
                 style={{
