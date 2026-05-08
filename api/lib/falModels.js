@@ -2,6 +2,11 @@
  * Catalog of fal.ai image-generation models exposed to the editor.
  * costCents is the per-call price in US cents (rounded up). Token cost is 1 token = 1 cent.
  * supportsReferences: model accepts reference image URLs (image-to-image / edit / multi-ref).
+ * estimatedDurationSec is a typical wall-clock for one generation, used by
+ *   the client progress bar (linear ramp to 95% over this window, then waits
+ *   on the actual completion). Numbers are eyeballed from observed averages
+ *   on small images at the project's default resolution; we'd rather slightly
+ *   overshoot and snap to 100% on completion than promise a too-short ETA.
  */
 const FAL_IMAGE_MODELS = [
   {
@@ -10,6 +15,7 @@ const FAL_IMAGE_MODELS = [
     costCents: 4,
     supportsReferences: true,
     family: "nano-banana",
+    estimatedDurationSec: 8,
   },
   {
     id: "fal-ai/nano-banana/edit",
@@ -17,6 +23,7 @@ const FAL_IMAGE_MODELS = [
     costCents: 4,
     supportsReferences: true,
     family: "nano-banana",
+    estimatedDurationSec: 10,
   },
   {
     id: "fal-ai/flux/schnell",
@@ -24,6 +31,7 @@ const FAL_IMAGE_MODELS = [
     costCents: 1,
     supportsReferences: false,
     family: "flux",
+    estimatedDurationSec: 4,
   },
   {
     id: "fal-ai/flux/dev",
@@ -31,6 +39,7 @@ const FAL_IMAGE_MODELS = [
     costCents: 3,
     supportsReferences: false,
     family: "flux",
+    estimatedDurationSec: 12,
   },
   {
     id: "fal-ai/flux-pro/v1.1",
@@ -38,6 +47,7 @@ const FAL_IMAGE_MODELS = [
     costCents: 4,
     supportsReferences: false,
     family: "flux",
+    estimatedDurationSec: 14,
   },
   {
     id: "fal-ai/flux-pro/v1.1-ultra",
@@ -45,6 +55,7 @@ const FAL_IMAGE_MODELS = [
     costCents: 6,
     supportsReferences: false,
     family: "flux",
+    estimatedDurationSec: 22,
   },
   {
     id: "fal-ai/flux-pro/kontext",
@@ -52,6 +63,7 @@ const FAL_IMAGE_MODELS = [
     costCents: 4,
     supportsReferences: true,
     family: "flux-kontext",
+    estimatedDurationSec: 14,
   },
   {
     id: "fal-ai/ideogram/v2",
@@ -59,6 +71,7 @@ const FAL_IMAGE_MODELS = [
     costCents: 8,
     supportsReferences: false,
     family: "ideogram",
+    estimatedDurationSec: 16,
   },
   {
     id: "fal-ai/recraft-v3",
@@ -66,6 +79,7 @@ const FAL_IMAGE_MODELS = [
     costCents: 4,
     supportsReferences: false,
     family: "recraft",
+    estimatedDurationSec: 14,
   },
   {
     id: "fal-ai/imagen3",
@@ -73,6 +87,33 @@ const FAL_IMAGE_MODELS = [
     costCents: 5,
     supportsReferences: false,
     family: "imagen",
+    estimatedDurationSec: 12,
+  },
+  {
+    id: "fal-ai/nano-banana-pro",
+    label: "Nano Banana Pro",
+    costCents: 15,
+    supportsReferences: true,
+    family: "nano-banana-pro",
+    estimatedDurationSec: 20,
+  },
+  {
+    id: "fal-ai/nano-banana-pro/edit",
+    label: "Nano Banana Pro Edit",
+    costCents: 15,
+    supportsReferences: true,
+    family: "nano-banana-pro",
+    estimatedDurationSec: 20,
+  },
+  {
+    id: "openai/gpt-image-2",
+    label: "GPT Image 2",
+    costCents: 5,
+    supportsReferences: true,
+    family: "gpt-image",
+    // Quality is hard-coded to "medium" for the catalog price; if we expose
+    // quality tiers later, costCents should follow (low ≈ 1¢, high ≈ 15¢).
+    estimatedDurationSec: 15,
   },
 ];
 

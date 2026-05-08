@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { debounce } from 'lodash';
 
 import animeFacts from '../../data/animeFacts.json';
@@ -61,6 +61,11 @@ function remoteDetailToProjectData(projectRow, frames) {
         references: Array.isArray(f.reference_urls) ? f.reference_urls : [],
         characterIds: Array.isArray(f.character_ids) ? f.character_ids : [],
         model: f.model || '',
+        // Set when a generation is in flight; cleared on completion. The
+        // editor reads this (plus the per-model estimatedDurationSec from
+        // the model catalog) to render a real progress bar that survives
+        // refreshes and shows up on peer devices.
+        generationStartedAt: f.generation_started_at || null,
         voiceline: meta.voiceline || '',
         speaker: meta.speaker || 'Narrator',
         baseModel: meta.baseModel || '',
@@ -259,8 +264,69 @@ const ProjectComponent = ({ projectId }) => {
   // reasoning as creatingVideoFrameIds — index-keyed loading state was
   // bleeding across frames when new ones were inserted.
   const [loadingFrameIds, setLoadingFrameIds] = useState(() => new Set());
-  const [progressMap, setProgressMap] = useState({});
+  // Tick value forces progressMap (a useMemo, below) to recompute every
+  // ~400ms while any frame is mid-generation. We rebuild the map from
+  // generationStartedAt + estimatedDurationSec rather than mutating state
+  // on each tick, so a refresh / cross-device load picks up wherever the
+  // server says the work started.
+  const [progressTick, setProgressTick] = useState(0);
   const [progressMessageMap, setProgressMessageMap] = useState({});
+
+  // Per-model expected wall-clock so the bar can advance proportionally
+  // to "how long this model usually takes". Falls back to 12s — slightly
+  // pessimistic on average, which keeps the bar from stalling visibly.
+  const modelDurationById = useMemo(() => {
+    const map = new Map();
+    for (const m of falModels || []) {
+      if (m?.id && Number(m.estimatedDurationSec) > 0) {
+        map.set(m.id, Number(m.estimatedDurationSec));
+      }
+    }
+    return map;
+  }, [falModels]);
+
+  // Set of scene indices (1-based) currently mid-generation per the server.
+  // Memoized so it's stable when nothing is in flight (avoids re-running the
+  // tick effect every render).
+  const activeGeneratingScenes = useMemo(() => {
+    const set = new Set();
+    const scenes = projectData?.scenes || [];
+    scenes.forEach((s, i) => {
+      if (s?.generationStartedAt && !s.thumbnail) set.add(i + 1);
+    });
+    return set;
+  }, [projectData]);
+
+  // Tick the clock while any generation is active. 400ms is fast enough that
+  // the bar feels alive without being a re-render hotspot.
+  useEffect(() => {
+    if (activeGeneratingScenes.size === 0) return undefined;
+    const id = setInterval(() => setProgressTick((t) => t + 1), 400);
+    return () => clearInterval(id);
+  }, [activeGeneratingScenes]);
+
+  // Compute progress (0–100) per scene from generationStartedAt + the model's
+  // estimated duration. Linear ramp capped at 95% so we never claim "done"
+  // before the server confirms — the actual completion event clears
+  // generationStartedAt and the bar disappears (the placeholder is replaced
+  // by the result image).
+  const progressMap = useMemo(() => {
+    const out = {};
+    const scenes = projectData?.scenes || [];
+    const now = Date.now();
+    scenes.forEach((s, i) => {
+      if (!s?.generationStartedAt || s.thumbnail) return;
+      const startedMs = new Date(s.generationStartedAt).getTime();
+      if (!Number.isFinite(startedMs)) return;
+      const estSec = modelDurationById.get(s.model) || 12;
+      const elapsedSec = Math.max(0, (now - startedMs) / 1000);
+      const pct = Math.min(95, (elapsedSec / estSec) * 100);
+      out[i + 1] = pct;
+    });
+    return out;
+    // progressTick intentionally pulls in time even when scenes are unchanged.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectData, modelDurationById, progressTick]);
   // Per-frame button label override during generation (e.g. "Generating");
   // keyed by frameId.
   const [generateImageText, setGenerateImageText] = useState({});
@@ -662,6 +728,9 @@ const ProjectComponent = ({ projectId }) => {
             if ('prompt' in f) next.positivePrompt = f.prompt || '';
             if ('result' in f) next.thumbnail = f.result || '';
             if ('model' in f) next.model = f.model || '';
+            if ('generation_started_at' in f) {
+              next.generationStartedAt = f.generation_started_at || null;
+            }
             if ('reference_urls' in f) {
               next.references = Array.isArray(f.reference_urls) ? f.reference_urls : [];
             }
@@ -2057,8 +2126,13 @@ const ProjectComponent = ({ projectId }) => {
   const currentScene = projectData?.scenes?.[selectedScene - 1];
   const currentFrameId = currentScene?.frameId || null;
   const prompt = currentScene?.positivePrompt || '';
+  // The local loadingFrameIds is the optimistic flag we set when we click
+  // Generate. Anchoring to the server-side generationStartedAt as well makes
+  // the loading state survive a refresh and follow along on peer devices /
+  // generations kicked off by the chat agent.
   const isCurrentLoadingImage = currentFrameId
-    ? loadingFrameIds.has(currentFrameId)
+    ? loadingFrameIds.has(currentFrameId) ||
+      (Boolean(currentScene?.generationStartedAt) && !currentScene?.thumbnail)
     : false;
   const isCurrentCreatingVideo = currentFrameId
     ? creatingVideoFrameIds.has(currentFrameId)
@@ -2121,7 +2195,10 @@ const ProjectComponent = ({ projectId }) => {
         hasGenerated: Boolean(currentScene?.thumbnail),
         generateLabel: isVideoFrame
           ? (isCurrentCreatingVideo ? 'Creating Video…' : 'Create Video')
-          : (generateImageText[currentFrameId] || 'Generate Visuals'),
+          : (
+              generateImageText[currentFrameId] ||
+              (currentScene?.thumbnail ? 'Regenerate Visuals' : 'Generate Visuals')
+            ),
         generateDisabled: isVideoFrame
           ? (isCurrentCreatingVideo || prompt.trim() === '' || !currentScene?.references?.length)
           : generateDisabled,

@@ -34,7 +34,7 @@ function isUuid(s) {
   return typeof s === "string" && UUID_RE.test(s);
 }
 
-const FRAME_COLUMNS = `id, prompt, result, reference_urls, character_ids, model, meta, created_at`;
+const FRAME_COLUMNS = `id, prompt, result, reference_urls, character_ids, model, meta, created_at, generation_started_at`;
 
 const REFERENCE_MIME_EXT = {
   "image/jpeg": ".jpg",
@@ -185,6 +185,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
         label: m.label,
         costCents: m.costCents,
         supportsReferences: m.supportsReferences,
+        estimatedDurationSec: m.estimatedDurationSec,
       })),
       defaultId: DEFAULT_MODEL_ID,
       videoModels: FAL_VIDEO_MODELS.map((m) => ({
@@ -897,6 +898,44 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
         ? `${rewritten.prompt}, ${styleSuffix}.`
         : rewritten.prompt;
 
+    // Mark the frame as "in flight" so peers (and refreshes of this client)
+    // can render a progress bar that's anchored to a real server timestamp.
+    // Cleared on success and on every error path below.
+    const generationStartedAt = new Date();
+    try {
+      await pool.query(
+        `UPDATE frames SET generation_started_at = $1, model = $2
+         WHERE id = $3 AND project_id = $4`,
+        [generationStartedAt, model.id, frameId, projectId],
+      );
+      await emit(
+        pool,
+        projectId,
+        "frame.updated",
+        {
+          id: frameId,
+          fields: {
+            model: model.id,
+            generation_started_at: generationStartedAt.toISOString(),
+          },
+        },
+        { source: "user", actorId: req.user.id },
+      );
+    } catch (markErr) {
+      console.error("mark generation_started_at failed:", markErr);
+    }
+    const clearGenerationStarted = async () => {
+      try {
+        await pool.query(
+          `UPDATE frames SET generation_started_at = NULL
+           WHERE id = $1 AND project_id = $2`,
+          [frameId, projectId],
+        );
+      } catch (clearErr) {
+        console.error("clear generation_started_at failed:", clearErr);
+      }
+    };
+
     let imageUrl;
     try {
       const out = await generateFalImage({
@@ -910,6 +949,14 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
     } catch (falErr) {
       console.error(falErr);
       await refundTokens(falErr.message || "fal generation failed");
+      await clearGenerationStarted();
+      await emit(
+        pool,
+        projectId,
+        "frame.updated",
+        { id: frameId, fields: { generation_started_at: null } },
+        { source: "user", actorId: req.user.id },
+      ).catch(() => {});
       return res.status(502).json({
         error: String(falErr.message || "Image generation failed"),
       });
@@ -917,6 +964,14 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
 
     if (!isProbablyAssetUrl(imageUrl)) {
       await refundTokens("Invalid image URL from provider");
+      await clearGenerationStarted();
+      await emit(
+        pool,
+        projectId,
+        "frame.updated",
+        { id: frameId, fields: { generation_started_at: null } },
+        { source: "user", actorId: req.user.id },
+      ).catch(() => {});
       return res.status(502).json({ error: "Invalid image URL from provider" });
     }
 
@@ -926,7 +981,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       await saveClient.query("BEGIN");
       const upd = await saveClient.query(
         `UPDATE frames
-         SET prompt = $1, result = $2, model = $3
+         SET prompt = $1, result = $2, model = $3, generation_started_at = NULL
          WHERE id = $4 AND project_id = $5
          RETURNING ${FRAME_COLUMNS}`,
         [prompt, imageUrl, model.id, frameId, projectId],
@@ -952,6 +1007,7 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
             prompt: savedFrameRow.prompt,
             result: savedFrameRow.result,
             model: savedFrameRow.model,
+            generation_started_at: null,
           },
         },
         { source: "user", actorId: req.user.id },
@@ -960,6 +1016,14 @@ module.exports = function createProjectsRouter(pool, requireAuth) {
       console.error(e);
       await saveClient.query("ROLLBACK").catch(() => {});
       await refundTokens(e.message || "save failed");
+      await clearGenerationStarted();
+      await emit(
+        pool,
+        projectId,
+        "frame.updated",
+        { id: frameId, fields: { generation_started_at: null } },
+        { source: "user", actorId: req.user.id },
+      ).catch(() => {});
       return res.status(500).json({ error: "Could not save frame" });
     } finally {
       saveClient.release();

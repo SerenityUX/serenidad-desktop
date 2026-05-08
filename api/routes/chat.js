@@ -31,8 +31,10 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (s) => typeof s === "string" && UUID_RE.test(s);
 
-// Tool-capable, fast, cheap.
-const CHAT_MODEL = "google/gemini-2.5-flash";
+// Sonnet via OpenRouter. Prompt caching (system + tools) is enabled below
+// via cache_control breakpoints — keeps the steady-state cost close to
+// Flash while getting much better tool routing.
+const CHAT_MODEL = "anthropic/claude-sonnet-4.5";
 
 const SYSTEM_PROMPT = `You are CoCreate, a creative collaborator inside an anime storyboard editor. You can read and modify the storyboard with tools. When the user asks you to "make N frames", "implement", "build out the storyboard", USE THE TOOLS — don't ask the user to do it manually.
 
@@ -1278,6 +1280,13 @@ async function buildContextSummary(pool, project, contextRefs) {
     : "";
 }
 
+// Tools are fully static — mark the last one as a cache breakpoint so
+// the entire tool block is cached on Anthropic. OpenRouter forwards
+// cache_control through to Anthropic for Claude models.
+const CACHED_TOOLS = TOOLS.map((t, i) =>
+  i === TOOLS.length - 1 ? { ...t, cache_control: { type: "ephemeral" } } : t,
+);
+
 async function callOpenRouter({ key, messages }) {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -1291,7 +1300,7 @@ async function callOpenRouter({ key, messages }) {
       model: CHAT_MODEL,
       temperature: 0.5,
       max_tokens: 1200,
-      tools: TOOLS,
+      tools: CACHED_TOOLS,
       tool_choice: "auto",
       messages,
     }),
@@ -1313,8 +1322,21 @@ async function buildBaseMessages(pool, project, chatId, excludeMessageId, contex
     [chatId, excludeMessageId || null],
   );
   const contextSummary = await buildContextSummary(pool, project, contextRefs);
+  // The big static system prompt is the cache breakpoint — Anthropic
+  // caches everything up to and including the marked content block, so
+  // each follow-up turn re-uses it at ~10% of input cost. Project meta
+  // and pinned context come AFTER (uncached) since they vary per chat.
   const messages = [
-    { role: "system", content: SYSTEM_PROMPT },
+    {
+      role: "system",
+      content: [
+        {
+          type: "text",
+          text: SYSTEM_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+    },
     {
       role: "system",
       content: `Project: ${project.name}\nVisual style (auto-appended to every generation prompt): ${project.style || "Ghibli/Miyazaki"}`,

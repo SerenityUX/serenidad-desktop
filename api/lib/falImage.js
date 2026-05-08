@@ -13,12 +13,19 @@ function getFalCredentials() {
 function endpointForCall(model, hasRefs) {
   if (!hasRefs) {
     if (model.id === "fal-ai/nano-banana/edit") return "fal-ai/nano-banana-2";
+    if (model.id === "fal-ai/nano-banana-pro/edit") return "fal-ai/nano-banana-pro";
     return model.id;
   }
   switch (model.family) {
     case "nano-banana":
       if (model.id === "fal-ai/nano-banana-2") return "fal-ai/nano-banana-2/edit";
       if (model.id === "fal-ai/nano-banana") return "fal-ai/nano-banana/edit";
+      return model.id;
+    case "nano-banana-pro":
+      if (model.id === "fal-ai/nano-banana-pro") return "fal-ai/nano-banana-pro/edit";
+      return model.id;
+    case "gpt-image":
+      if (model.id === "openai/gpt-image-2") return "openai/gpt-image-2/edit";
       return model.id;
     default:
       return model.id;
@@ -39,6 +46,21 @@ function buildInput(endpointId, model, { prompt, width, height, referenceUrls })
     };
   }
 
+  // GPT Image 2 has its own input shape: image_size (preset or custom) +
+  // quality + image_urls on the /edit endpoint. We hard-code quality to
+  // "medium" so the cost matches the catalog's costCents.
+  if (endpointId === "openai/gpt-image-2" || endpointId === "openai/gpt-image-2/edit") {
+    const input = {
+      prompt,
+      num_images: 1,
+      quality: "medium",
+      output_format: "png",
+      image_size: { width: Number(width) || 1280, height: Number(height) || 720 },
+    };
+    if (endpointId.endsWith("/edit")) input.image_urls = refs;
+    return input;
+  }
+
   switch (model.family) {
     case "nano-banana": {
       return {
@@ -48,6 +70,16 @@ function buildInput(endpointId, model, { prompt, width, height, referenceUrls })
         output_format: "png",
         resolution: "1K",
         limit_generations: true,
+      };
+    }
+    case "nano-banana-pro": {
+      // Pro doesn't accept the resolution / limit_generations flags that
+      // nano-banana-2 does — keep the input minimal.
+      return {
+        prompt,
+        num_images: 1,
+        aspect_ratio,
+        output_format: "png",
       };
     }
     case "flux-kontext": {
